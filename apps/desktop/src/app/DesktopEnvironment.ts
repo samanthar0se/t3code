@@ -76,7 +76,9 @@ export class DesktopEnvironment extends Context.Service<
   }
 >()("@t3tools/desktop/app/DesktopEnvironment") {}
 
-const APP_BASE_NAME = "T3 Code";
+// Fork-only cosmetic rebrand. Upstream ships "T3 Code"; everything else in the
+// repo (bundle ids, protocol schemes, user-data dirs) keeps the upstream name.
+const APP_BASE_NAME = "Codey";
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
@@ -97,7 +99,9 @@ function resolveDesktopAppBranding(input: {
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    // Fork-only: the stable channel ships unsuffixed. `stageLabel` still
+    // carries "Alpha" so it keeps satisfying DesktopAppStageLabelSchema.
+    displayName: stageLabel === "Alpha" ? APP_BASE_NAME : `${APP_BASE_NAME} (${stageLabel})`,
   };
 }
 

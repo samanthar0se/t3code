@@ -48,3 +48,12 @@ Verify every result is 1024×1024 and has the classic macOS safe area: an 824×8
 ```
 
 Do not edit the generated PNG or ICO files directly.
+
+## Fork note
+
+This fork ships the `>_` mark in `dev/app-icon.icon` and rebrands the client UI to "Codey".
+Because Icon Composer is macOS-only, the tracked `dev/` rasters (plus the `apps/web/public`
+copies and `apps/desktop/resources/icon.{png,ico}`) were regenerated with
+`node scripts/fork-render-brand-icons.mjs`, which renders the same layer stack in headless
+Chrome. It is a stand-in, not a replacement: prefer `vp run icons:export` when a Mac is
+available. The `nightly/` and `prod/` projects are untouched upstream artwork.
