@@ -4,6 +4,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -44,15 +45,20 @@ const PI_VERSION_PROBE_TIMEOUT_MS = 15_000;
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
-const runPiVersion = (piSettings: PiSettings, environment: NodeJS.ProcessEnv) =>
-  Effect.suspend(() => {
-    const binaryPath = piSettings.binaryPath || "pi";
-    const command = ChildProcess.make(binaryPath, ["--version"], {
-      env: environment,
-      shell: false,
-    });
-    return spawnAndCollect(binaryPath, command);
+const runPiVersion = Effect.fn("runPiVersion")(function* (
+  piSettings: PiSettings,
+  environment: NodeJS.ProcessEnv,
+) {
+  const binaryPath = piSettings.binaryPath || "pi";
+  const spawnCommand = yield* resolveSpawnCommand(binaryPath, ["--version"], {
+    env: environment,
   });
+  const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+    env: environment,
+    shell: spawnCommand.shell,
+  });
+  return yield* spawnAndCollect(binaryPath, command);
+});
 
 /** Discover models via a short-lived `pi --mode rpc` session; `[]` on any failure. */
 export const discoverPiModelsViaRpc = Effect.fn("discoverPiModelsViaRpc")(

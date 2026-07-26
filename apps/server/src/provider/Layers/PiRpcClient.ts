@@ -8,6 +8,7 @@ import type {
   RpcResponse,
 } from "@earendil-works/pi-coding-agent";
 import type { ModelSelection, ServerProviderModel } from "@t3tools/contracts";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import type { ModelCapabilities } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
@@ -314,12 +315,15 @@ export interface MakePiRpcTransportOptions {
 export const makePiRpcTransport = (options: MakePiRpcTransportOptions) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const spawnCommand = yield* resolveSpawnCommand(options.binaryPath, options.args, {
+      env: options.env,
+    });
 
     const child = yield* spawner.spawn(
-      ChildProcess.make(options.binaryPath || "pi", [...options.args], {
+      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         cwd: options.cwd,
         env: options.env,
-        shell: false,
+        shell: spawnCommand.shell,
         forceKillAfter: 5000,
       }),
     );

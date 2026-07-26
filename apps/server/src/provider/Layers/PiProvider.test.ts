@@ -5,20 +5,45 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { PiSettings } from "@t3tools/contracts";
+import { HostProcessExecutablePath, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import { buildInitialPiProviderSnapshot, checkPiProviderStatus } from "./PiProvider.ts";
 
 const decodePiSettings = Schema.decodeSync(PiSettings);
 
-// fake `pi`: `--version` exits 0; anything else returns empty get_available_models
-const HEALTHY_PI_SCRIPT = [
-  "#!/bin/sh",
-  'case "$1" in',
-  '  --version) printf "pi 0.80.2\\n"; exit 0 ;;',
-  '  *) printf \'{"type":"response","command":"get_available_models","id":"pi-model-discovery","success":true,"data":{"models":[]}}\\n\'; exit 0 ;;',
-  "esac",
-  "",
-].join("\n");
+const EMPTY_MODELS_RESPONSE =
+  '{"type":"response","command":"get_available_models","id":"pi-model-discovery","success":true,"data":{"models":[]}}';
+
+const HEALTHY_PI_SCRIPT = `
+if (process.argv[2] === "--version") {
+  console.log("pi 0.80.2");
+} else {
+  console.log('${EMPTY_MODELS_RESPONSE}');
+}
+`;
+
+const makePiTestExecutable = Effect.fn("makePiTestExecutable")(function* (
+  dir: string,
+  script: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const platform = yield* HostProcessPlatform;
+  const executablePath = yield* HostProcessExecutablePath;
+  const scriptPath = path.join(dir, "pi-mock.cjs");
+  const piPath = path.join(dir, platform === "win32" ? "pi.cmd" : "pi");
+  yield* fs.writeFileString(scriptPath, script);
+  yield* fs.writeFileString(
+    piPath,
+    platform === "win32"
+      ? `@echo off\r\n"${executablePath}" "${scriptPath}" %*\r\n`
+      : `#!/bin/sh\nexec "${executablePath}" "${scriptPath}" "$@"\n`,
+  );
+  if (platform !== "win32") {
+    yield* fs.chmod(piPath, 0o755);
+  }
+  return piPath;
+});
 
 describe("buildInitialPiProviderSnapshot", () => {
   it.effect("returns a disabled snapshot when settings.enabled is false", () =>
@@ -86,14 +111,11 @@ it.layer(NodeServices.layer)("checkPiProviderStatus", (it) => {
       const snapshot = yield* Effect.scoped(
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
           const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-pi-version-" });
-          const piPath = path.join(dir, "pi");
-          yield* fs.writeFileString(
-            piPath,
-            ["#!/bin/sh", 'printf "pi error\\n" >&2', "exit 2", ""].join("\n"),
+          const piPath = yield* makePiTestExecutable(
+            dir,
+            'console.error("pi error"); process.exitCode = 2;\n',
           );
-          yield* fs.chmod(piPath, 0o755);
 
           return yield* checkPiProviderStatus(
             decodePiSettings({ enabled: true, binaryPath: piPath }),
@@ -114,11 +136,8 @@ it.layer(NodeServices.layer)("checkPiProviderStatus", (it) => {
       const snapshot = yield* Effect.scoped(
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
           const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-pi-ready-" });
-          const piPath = path.join(dir, "pi");
-          yield* fs.writeFileString(piPath, HEALTHY_PI_SCRIPT);
-          yield* fs.chmod(piPath, 0o755);
+          const piPath = yield* makePiTestExecutable(dir, HEALTHY_PI_SCRIPT);
           return yield* checkPiProviderStatus(
             decodePiSettings({ enabled: true, binaryPath: piPath, customModels: ["x/y"] }),
             dir,
@@ -137,21 +156,17 @@ it.layer(NodeServices.layer)("checkPiProviderStatus", (it) => {
         const snapshot = yield* Effect.scoped(
           Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
-            const path = yield* Path.Path;
             const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-pi-slow-version-" });
-            const piPath = path.join(dir, "pi");
-            yield* fs.writeFileString(
-              piPath,
-              [
-                "#!/bin/sh",
-                'case "$1" in',
-                '  --version) sleep 5; printf "pi 0.81.1\\n"; exit 0 ;;',
-                '  *) printf \'{"type":"response","command":"get_available_models","id":"pi-model-discovery","success":true,"data":{"models":[]}}\\n\'; exit 0 ;;',
-                "esac",
-                "",
-              ].join("\n"),
+            const piPath = yield* makePiTestExecutable(
+              dir,
+              `
+if (process.argv[2] === "--version") {
+  setTimeout(() => console.log("pi 0.81.1"), 5_000);
+} else {
+  console.log('${EMPTY_MODELS_RESPONSE}');
+}
+`,
             );
-            yield* fs.chmod(piPath, 0o755);
             return yield* checkPiProviderStatus(
               decodePiSettings({ enabled: true, binaryPath: piPath, customModels: ["x/y"] }),
               dir,
@@ -170,11 +185,8 @@ it.layer(NodeServices.layer)("checkPiProviderStatus", (it) => {
       const snapshot = yield* Effect.scoped(
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
           const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-pi-nomodels-" });
-          const piPath = path.join(dir, "pi");
-          yield* fs.writeFileString(piPath, HEALTHY_PI_SCRIPT);
-          yield* fs.chmod(piPath, 0o755);
+          const piPath = yield* makePiTestExecutable(dir, HEALTHY_PI_SCRIPT);
           return yield* checkPiProviderStatus(
             decodePiSettings({ enabled: true, binaryPath: piPath }),
             dir,

@@ -11,6 +11,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import { HostProcessExecutablePath, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
 
@@ -33,12 +34,17 @@ const PiTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cw
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 // shell wrapper that execs the JSONL mock via node; `PI_MOCK_*` env drives behavior
-async function makePiWrapper(): Promise<string> {
+async function makePiWrapper(platform: NodeJS.Platform, executablePath: string): Promise<string> {
   const dir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "pi-textgen-mock-"));
-  const wrapperPath = NodePath.join(dir, "fake-pi.sh");
-  const script = `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(MOCK_PATH)} "$@"\n`;
+  const wrapperPath = NodePath.join(dir, platform === "win32" ? "fake-pi.cmd" : "fake-pi");
+  const script =
+    platform === "win32"
+      ? `@echo off\r\n"${executablePath}" "${MOCK_PATH}" %*\r\n`
+      : `#!/bin/sh\nexec "${executablePath}" "${MOCK_PATH}" "$@"\n`;
   await NodeFSP.writeFile(wrapperPath, script, "utf8");
-  await NodeFSP.chmod(wrapperPath, 0o755);
+  if (platform !== "win32") {
+    await NodeFSP.chmod(wrapperPath, 0o755);
+  }
   return wrapperPath;
 }
 
@@ -47,7 +53,9 @@ const withFakePi = <A, E, R>(
   use: (textGeneration: TextGenerationShape) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
-    const wrapperPath = yield* Effect.promise(() => makePiWrapper());
+    const platform = yield* HostProcessPlatform;
+    const executablePath = yield* HostProcessExecutablePath;
+    const wrapperPath = yield* Effect.promise(() => makePiWrapper(platform, executablePath));
     const settings = decodePiSettings({ binaryPath: wrapperPath });
     const environment: NodeJS.ProcessEnv = { ...process.env, ...mockEnv };
     const textGeneration = yield* makePiTextGeneration(settings, environment);
