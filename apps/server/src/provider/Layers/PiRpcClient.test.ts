@@ -18,6 +18,7 @@ import {
   piModelCapabilities,
   piModelInfoToServerModel,
   piModelSlug,
+  piThinkingLevelsForModel,
   piResponseHasCommand,
   piResponseSucceeded,
   planPiModelSwitch,
@@ -157,15 +158,55 @@ describe("splitPiModelSlug / piModelSlug", () => {
 });
 
 describe("piModelCapabilities", () => {
-  it("exposes a thinking descriptor for reasoning models", () => {
-    const capabilities = piModelCapabilities(true);
-    expect((capabilities.optionDescriptors ?? []).map((descriptor) => descriptor.id)).toContain(
-      "thinking",
-    );
+  it("uses Pi's core thinking levels for reasoning models without an explicit map", () => {
+    const model = asModelInfo({ provider: "openai", id: "reasoning", reasoning: true });
+    expect(piThinkingLevelsForModel(model)).toEqual(["off", "minimal", "low", "medium", "high"]);
+    const descriptor = piModelCapabilities(model).optionDescriptors?.[0];
+    expect(descriptor?.id).toBe("thinking");
+    if (descriptor?.type === "select") {
+      expect(descriptor.options.map((option) => option.id)).toEqual([
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+      ]);
+      expect(descriptor.options.find((option) => option.isDefault)?.id).toBe("medium");
+    }
+  });
+
+  it("exposes xhigh and max only when the model maps them", () => {
+    const model = asModelInfo({
+      provider: "openai-codex",
+      id: "gpt-5.6-sol",
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
+    });
+    expect(piThinkingLevelsForModel(model)).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+  });
+
+  it("removes levels explicitly disabled by a sparse custom-model map", () => {
+    const model = asModelInfo({
+      provider: "custom",
+      id: "reasoning",
+      reasoning: true,
+      thinkingLevelMap: { off: null, minimal: null, high: null, max: "max" },
+    });
+    expect(piThinkingLevelsForModel(model)).toEqual(["low", "medium", "max"]);
   });
 
   it("exposes no option descriptors for non-reasoning models", () => {
-    expect(piModelCapabilities(false).optionDescriptors ?? []).toEqual([]);
+    const model = asModelInfo({ provider: "openai", id: "plain", reasoning: false });
+    expect(piThinkingLevelsForModel(model)).toEqual([]);
+    expect(piModelCapabilities(model).optionDescriptors ?? []).toEqual([]);
   });
 });
 
@@ -372,7 +413,13 @@ describe("buildPiTurnCommand", () => {
 
 describe("asPiThinkingLevel / resolvePiThinkingLevel", () => {
   it("keeps descriptor option ids in sync with the ThinkingLevel set", () => {
-    const descriptorIds = (piModelCapabilities(true).optionDescriptors ?? []).flatMap(
+    const model = asModelInfo({
+      provider: "openai",
+      id: "reasoning",
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+    });
+    const descriptorIds = (piModelCapabilities(model).optionDescriptors ?? []).flatMap(
       (descriptor) => (descriptor.type === "select" ? descriptor.options.map((o) => o.id) : []),
     );
     expect(descriptorIds).toEqual([...PI_THINKING_LEVEL_VALUES]);

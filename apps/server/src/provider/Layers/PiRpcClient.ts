@@ -127,9 +127,10 @@ const PI_THINKING_LEVELS = [
   { value: "off", label: "Off" },
   { value: "minimal", label: "Minimal" },
   { value: "low", label: "Low" },
-  { value: "medium", label: "Medium", isDefault: true },
+  { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
   { value: "xhigh", label: "Extra High" },
+  { value: "max", label: "Max" },
 ] as const;
 
 export type PiThinkingLevel = Extract<RpcCommand, { type: "set_thinking_level" }>["level"];
@@ -176,17 +177,38 @@ export function planPiModelSwitch(
   return { kind: "switch", provider: parts.provider, modelId: parts.id, slug: requestedModel };
 }
 
-export function piModelCapabilities(reasoning: boolean): ModelCapabilities {
+export function piThinkingLevelsForModel(model: ModelInfo): ReadonlyArray<PiThinkingLevel> {
+  if (!model.reasoning) return [];
+  const thinkingLevelMap = (
+    model as unknown as {
+      readonly thinkingLevelMap?: Readonly<Record<string, string | null | undefined>>;
+    }
+  ).thinkingLevelMap;
+  return PI_THINKING_LEVEL_VALUES.filter((level) => {
+    const mapped = thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return mapped !== undefined;
+    return true;
+  });
+}
+
+export function piModelCapabilities(model: ModelInfo): ModelCapabilities {
+  const supportedLevels = piThinkingLevelsForModel(model);
+  const defaultLevel = supportedLevels.includes("medium") ? "medium" : supportedLevels[0];
   return createModelCapabilities({
-    optionDescriptors: reasoning
-      ? [
-          buildSelectOptionDescriptor({
-            id: "thinking",
-            label: "Thinking",
-            options: PI_THINKING_LEVELS.map((level) => ({ ...level })),
-          }),
-        ]
-      : [],
+    optionDescriptors:
+      supportedLevels.length > 0
+        ? [
+            buildSelectOptionDescriptor({
+              id: "thinking",
+              label: "Thinking",
+              options: supportedLevels.map((value) => {
+                const level = PI_THINKING_LEVELS.find((candidate) => candidate.value === value)!;
+                return { ...level, isDefault: value === defaultLevel };
+              }),
+            }),
+          ]
+        : [],
   });
 }
 
@@ -198,7 +220,7 @@ export function piModelInfoToServerModel(model: ModelInfo): ServerProviderModel 
     slug,
     name,
     isCustom: false,
-    capabilities: piModelCapabilities(Boolean(model.reasoning)),
+    capabilities: piModelCapabilities(model),
   };
 }
 
