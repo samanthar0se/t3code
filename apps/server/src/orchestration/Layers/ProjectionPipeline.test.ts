@@ -1432,6 +1432,103 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("keeps the last completed turn on the thread when the session settles", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-01-01T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-settle-latest-turn");
+      const turnId = TurnId.make("turn-settle-latest-1");
+
+      yield* eventStore.append({
+        type: "thread.created",
+        eventId: EventId.make("evt-slt1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-slt1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-slt1"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-settle-latest-turn"),
+          title: "Settle latest turn",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude"),
+            model: "claude-opus",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-slt2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        commandId: CommandId.make("cmd-slt2"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-slt2"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "claude",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          },
+        },
+      });
+
+      // The session settling carries activeTurnId: null. That null must not
+      // erase the turn the thread just finished — downstream "Done"/unseen
+      // completion indicators read latest_turn_id to know a run happened.
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-slt3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:01:00.000Z",
+        commandId: CommandId.make("cmd-slt3"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-slt3"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "claude",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-01-01T00:01:00.000Z",
+          },
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const threadRows = yield* sql<{ readonly latestTurnId: string | null }>`
+        SELECT latest_turn_id AS "latestTurnId"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.deepEqual(threadRows, [{ latestTurnId: turnId }]);
+    }),
+  );
+
   it.effect("settles a superseded running turn when a new turn becomes active", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
