@@ -21,6 +21,7 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
+  CircleDotIcon,
   ClockIcon,
   CopyIcon,
   FolderIcon,
@@ -431,14 +432,15 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke = wokeAtDate !== null && (lastVisitedDate === null || lastVisitedDate < wokeAtDate);
-  // In-flight rows (working, or waiting on approval/input) fade as a whole:
-  // there is nothing for the user to do yet, so prominence is reserved for
-  // rows that need a human — done (unread), read-but-unsettled, failed, and
-  // freshly woken. The status label keeps its hue, so waiting rows stay
-  // findable. In-flight rows recede the same as read-ready ones (inbox-zero:
-  // working threads aren't your problem yet) — only the colored status label
-  // stands out.
-  const isInFlight = status === "working" || status === "approval" || status === "input";
+  // In-flight rows (working, or waiting on approval) fade as a whole: there is
+  // nothing for the user to do yet, so prominence is reserved for rows that
+  // need a human — done (unread), read-but-unsettled, failed, freshly woken,
+  // and input. The status label keeps its hue, so waiting rows stay findable.
+  // In-flight rows recede the same as read-ready ones (inbox-zero: working
+  // threads aren't your problem yet) — only the colored status label stands
+  // out. Input is deliberately NOT in-flight: the agent asked a question and
+  // is blocked until you answer, so the row is your problem and must not dim.
+  const isInFlight = status === "working" || status === "approval";
   const shouldRecede =
     (status === "ready" || isInFlight) && !isUnread && !isWoke && !props.isActive && !isSelected;
   // Status hues follow the system-wide convention set by sidebar v1 and the
@@ -461,8 +463,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         : status === "input"
           ? {
               label: "Input",
-              icon: null,
-              className: "text-indigo-600 dark:text-indigo-300",
+              icon: "input" as const,
+              className:
+                "animate-sidebar-input-text text-indigo-600 motion-reduce:animate-none dark:text-indigo-300",
             }
           : status === "failed"
             ? {
@@ -895,6 +898,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                     >
                       {topStatus.icon === "working" ? (
                         <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
+                      ) : topStatus.icon === "input" ? (
+                        <CircleDotIcon aria-hidden className="size-4 shrink-0" />
                       ) : topStatus.icon === "done" ? (
                         <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
                       ) : topStatus.icon === "woke" ? (
