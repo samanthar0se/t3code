@@ -7,6 +7,8 @@ import {
   classifyPiStdoutMessage,
   extractAssistantTextDelta,
   extractAvailableModels,
+  extractPiAutoCompactionEnabled,
+  extractPiTokenUsage,
   extractForkMessages,
   extractLastAssistantText,
   extractReasoningTextDelta,
@@ -252,6 +254,51 @@ describe("extractSessionFile", () => {
     expect(
       extractSessionFile(
         asResponse({ type: "response", success: true, data: { sessionFile: "" } }),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("Pi context usage", () => {
+  const stateResponse = asResponse({
+    type: "response",
+    command: "get_state",
+    success: true,
+    data: { autoCompactionEnabled: true },
+  });
+  const statsResponse = asResponse({
+    type: "response",
+    command: "get_session_stats",
+    success: true,
+    data: {
+      tokens: { input: 10_000, output: 750, cacheRead: 25_000, total: 36_250 },
+      contextUsage: { tokens: 35_500, contextWindow: 200_000, percent: 17.75 },
+    },
+  });
+
+  it("normalizes session stats for the shared context window meter", () => {
+    expect(
+      extractPiTokenUsage(statsResponse, extractPiAutoCompactionEnabled(stateResponse)),
+    ).toEqual({
+      usedTokens: 35_500,
+      totalProcessedTokens: 36_250,
+      maxTokens: 200_000,
+      inputTokens: 10_000,
+      cachedInputTokens: 25_000,
+      outputTokens: 750,
+      compactsAutomatically: true,
+    });
+  });
+
+  it("ignores missing or zero context usage", () => {
+    expect(extractPiTokenUsage(undefined)).toBeUndefined();
+    expect(
+      extractPiTokenUsage(
+        asResponse({
+          type: "response",
+          success: true,
+          data: { tokens: { total: 0 }, contextUsage: { tokens: 0, contextWindow: 200_000 } },
+        }),
       ),
     ).toBeUndefined();
   });

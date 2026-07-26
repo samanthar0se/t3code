@@ -7,7 +7,11 @@ import type {
   RpcExtensionUIResponse,
   RpcResponse,
 } from "@earendil-works/pi-coding-agent";
-import type { ModelSelection, ServerProviderModel } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  ServerProviderModel,
+  ThreadTokenUsageSnapshot,
+} from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import type { ModelCapabilities } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -235,6 +239,55 @@ export function extractSessionFile(response: RpcResponse | undefined): string | 
   return typeof sessionFile === "string" && sessionFile.trim().length > 0
     ? sessionFile.trim()
     : undefined;
+}
+
+function finiteNonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function finitePositiveInteger(value: unknown): number | undefined {
+  const integer = finiteNonNegativeInteger(value);
+  return integer !== undefined && integer > 0 ? integer : undefined;
+}
+
+export function extractPiAutoCompactionEnabled(
+  response: RpcResponse | undefined,
+): boolean | undefined {
+  const value = piResponseData(response)?.["autoCompactionEnabled"];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+export function extractPiTokenUsage(
+  response: RpcResponse | undefined,
+  compactsAutomatically?: boolean,
+): ThreadTokenUsageSnapshot | undefined {
+  const data = piResponseData(response);
+  const contextUsage = data?.["contextUsage"];
+  const tokens = data?.["tokens"];
+  if (!contextUsage || typeof contextUsage !== "object" || !tokens || typeof tokens !== "object") {
+    return undefined;
+  }
+
+  const context = contextUsage as Record<string, unknown>;
+  const totals = tokens as Record<string, unknown>;
+  const usedTokens = finitePositiveInteger(context["tokens"]);
+  if (usedTokens === undefined) return undefined;
+
+  const totalProcessedTokens = finiteNonNegativeInteger(totals["total"]);
+  const maxTokens = finitePositiveInteger(context["contextWindow"]);
+  const inputTokens = finiteNonNegativeInteger(totals["input"]);
+  const cachedInputTokens = finiteNonNegativeInteger(totals["cacheRead"]);
+  const outputTokens = finiteNonNegativeInteger(totals["output"]);
+
+  return {
+    usedTokens,
+    ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(compactsAutomatically !== undefined ? { compactsAutomatically } : {}),
+  };
 }
 
 export function extractAvailableModels(

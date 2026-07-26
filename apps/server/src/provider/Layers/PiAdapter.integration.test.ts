@@ -352,6 +352,90 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
     }),
   );
 
+  it.effect("emits Pi context window usage before completing the turn", () =>
+    Effect.gen(function* () {
+      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
+      const threadId = ThreadId.make("pi-int-context-window");
+      const collected = yield* collectEvents(
+        adapter,
+        threadId,
+        (event) => event.type === "turn.completed",
+      );
+      fake.setResponse(
+        "get_state",
+        asResponse({
+          type: "response",
+          id: "x",
+          command: "get_state",
+          success: true,
+          data: {
+            sessionFile: "/tmp/pi-session.json",
+            autoCompactionEnabled: true,
+          },
+        }),
+      );
+      fake.setResponse(
+        "get_session_stats",
+        asResponse({
+          type: "response",
+          command: "get_session_stats",
+          success: true,
+          data: {
+            sessionFile: "/tmp/pi-session.json",
+            sessionId: "pi-session",
+            userMessages: 1,
+            assistantMessages: 1,
+            toolCalls: 0,
+            toolResults: 0,
+            totalMessages: 2,
+            tokens: {
+              input: 10_000,
+              output: 750,
+              cacheRead: 25_000,
+              cacheWrite: 500,
+              total: 36_250,
+            },
+            cost: 0.1,
+            contextUsage: { tokens: 35_500, contextWindow: 200_000, percent: 17.75 },
+          },
+        }),
+      );
+
+      yield* adapter.startSession({
+        threadId,
+        provider: PI,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "measure context", attachments: [] });
+      yield* fake.pushEvent({ type: "turn_start" } as AgentSessionEvent);
+      yield* fake.pushEvent({
+        type: "agent_end",
+        messages: [],
+        willRetry: false,
+      } as AgentSessionEvent);
+
+      const events = yield* Fiber.join(collected.fiber).pipe(
+        Effect.flatMap(() => Ref.get(collected.store)),
+      );
+      const usage = events.find((event) => event.type === "thread.token-usage.updated");
+      expect(usage).toBeDefined();
+      if (usage?.type === "thread.token-usage.updated") {
+        expect(usage.payload.usage).toMatchObject({
+          usedTokens: 35_500,
+          totalProcessedTokens: 36_250,
+          maxTokens: 200_000,
+          inputTokens: 10_000,
+          cachedInputTokens: 25_000,
+          outputTokens: 750,
+          compactsAutomatically: true,
+        });
+      }
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect(
     "does not finalize the turn on agent_end willRetry; completes on the terminal end",
     () =>

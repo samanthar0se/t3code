@@ -45,6 +45,8 @@ import {
   type AgentSessionEvent,
   buildPiTurnCommand,
   extractAssistantTextDelta,
+  extractPiAutoCompactionEnabled,
+  extractPiTokenUsage,
   extractForkMessages,
   extractReasoningTextDelta,
   extractSessionFile,
@@ -71,6 +73,7 @@ const PI_MESSAGES_TIMEOUT_MS = 5_000;
 // fork/new_session rebinds to a new session file — give it more headroom
 const PI_FORK_TIMEOUT_MS = 15_000;
 const PI_MODEL_OPTIONS_TIMEOUT_MS = 5_000;
+const PI_SESSION_STATS_TIMEOUT_MS = 5_000;
 
 interface PiToolItem {
   readonly id: RuntimeItemId;
@@ -105,6 +108,7 @@ interface PiSessionContext {
   // slug the pi process is running; used to issue set_model only on change
   currentModel: string | undefined;
   appliedThinkingLevel: PiThinkingLevel | undefined;
+  autoCompactionEnabled: boolean | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +451,20 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
           // finalize only on the terminal end, since a retry isn't a user interrupt
           if (event.willRetry) return;
           if (context.turnState) {
+            const usageResponse = yield* context.transport.request(
+              { type: "get_session_stats" },
+              `pi-get-session-stats-${yield* nextUuid}`,
+              PI_SESSION_STATS_TIMEOUT_MS,
+            );
+            const usage = extractPiTokenUsage(usageResponse, context.autoCompactionEnabled);
+            if (usage) {
+              yield* offerRuntimeEvent({
+                ...base,
+                turnId: context.turnState.turnId,
+                type: "thread.token-usage.updated",
+                payload: { usage },
+              });
+            }
             yield* completeTurn(context, "completed");
           }
           return;
@@ -828,6 +846,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       stopped: false,
       currentModel: modelSelection?.model,
       appliedThinkingLevel: thinkingLevel,
+      autoCompactionEnabled: undefined,
     };
     sessions.set(threadId, context);
 
@@ -855,6 +874,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       });
     }
     const sessionFile = extractSessionFile(stateResponse);
+    context.autoCompactionEnabled = extractPiAutoCompactionEnabled(stateResponse);
     if (sessionFile !== undefined) {
       context.session = { ...context.session, resumeCursor: { sessionFile } };
     }
