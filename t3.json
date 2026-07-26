@@ -7,11 +7,6 @@
       "command": "vp i && ln -sf $T3CODE_PROJECT_ROOT/.env .env && ln -sf $T3CODE_PROJECT_ROOT/infra/relay/.env infra/relay/.env",
       "icon": "configure",
       "runOnWorktreeCreate": true
-    },
-    {
-      "name": "Build & Release All Clients",
-      "command": "bash scripts/release-all-clients.sh",
-      "icon": "build"
     }
   ]
 }
