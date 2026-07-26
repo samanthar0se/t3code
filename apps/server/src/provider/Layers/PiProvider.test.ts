@@ -18,7 +18,42 @@ const HEALTHY_PI_SCRIPT = `
 if (process.argv[2] === "--version") {
   console.log("pi 0.80.2");
 } else {
-  console.log('${EMPTY_MODELS_RESPONSE}');
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    input += chunk;
+    let newlineIndex = input.indexOf("\\n");
+    while (newlineIndex >= 0) {
+      const line = input.slice(0, newlineIndex);
+      input = input.slice(newlineIndex + 1);
+      newlineIndex = input.indexOf("\\n");
+      if (!line.trim()) continue;
+      const command = JSON.parse(line);
+      if (command.type === "get_available_models") {
+        console.log(JSON.stringify({
+          type: "response",
+          command: "get_available_models",
+          id: command.id,
+          success: true,
+          data: { models: [] },
+        }));
+      } else if (command.type === "get_commands") {
+        console.log(JSON.stringify({
+          type: "response",
+          command: "get_commands",
+          id: command.id,
+          success: true,
+          data: {
+            commands: [
+              { name: "review", description: "Review the current changes", source: "extension" },
+              { name: "fix-tests", description: "Fix failing tests", source: "prompt", location: "project", path: "/workspace/.pi/prompts/fix-tests.md" },
+              { name: "skill:browser-use", description: "Automate a browser", source: "skill", location: "user", path: "/home/test/.pi/agent/skills/browser-use/SKILL.md" },
+            ],
+          },
+        }));
+      }
+    }
+  });
 }
 `;
 
@@ -150,6 +185,36 @@ it.layer(NodeServices.layer)("checkPiProviderStatus", (it) => {
       );
       expect(snapshot.status).toBe("ready");
       expect(snapshot.auth.status).toBe("authenticated");
+    }),
+  );
+
+  it.effect("includes Pi slash commands and skills in the provider snapshot", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-pi-commands-" });
+          const piPath = yield* makePiTestExecutable(dir, HEALTHY_PI_SCRIPT);
+          return yield* checkPiProviderStatus(
+            decodePiSettings({ enabled: true, binaryPath: piPath, customModels: ["x/y"] }),
+            dir,
+          );
+        }),
+      );
+
+      expect(snapshot.slashCommands).toEqual([
+        { name: "review", description: "Review the current changes" },
+        { name: "fix-tests", description: "Fix failing tests" },
+      ]);
+      expect(snapshot.skills).toEqual([
+        {
+          name: "browser-use",
+          description: "Automate a browser",
+          path: "/home/test/.pi/agent/skills/browser-use/SKILL.md",
+          scope: "user",
+          enabled: true,
+        },
+      ]);
     }),
   );
 
