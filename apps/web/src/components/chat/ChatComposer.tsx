@@ -151,7 +151,14 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   );
 }
 import { Button } from "../ui/button";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  selectTriggerVariants,
+  SelectValue,
+} from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
@@ -370,7 +377,10 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
         </Tooltip>
       ) : (
         <div
-          className="inline-flex h-8 shrink-0 items-center gap-2 px-2 font-medium text-muted-foreground sm:px-3"
+          className={cn(
+            selectTriggerVariants({ variant: "ghost", size: "sm" }),
+            "cursor-default font-medium hover:bg-transparent hover:text-muted-foreground/70",
+          )}
           aria-label="Full access"
         >
           <LockOpenIcon className="size-4" />
