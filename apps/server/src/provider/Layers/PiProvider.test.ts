@@ -54,6 +54,7 @@ describe("buildInitialPiProviderSnapshot", () => {
       expect(snapshot.installed).toBe(false);
       expect(snapshot.message).toContain("disabled");
       expect(snapshot.showInteractionModeToggle).toBe(false);
+      expect(snapshot.showRuntimeModeToggle).toBe(false);
     }),
   );
 
@@ -66,6 +67,7 @@ describe("buildInitialPiProviderSnapshot", () => {
       expect(snapshot.version).toBeNull();
       expect(snapshot.message).toContain("Checking Pi");
       expect(snapshot.showInteractionModeToggle).toBe(false);
+      expect(snapshot.showRuntimeModeToggle).toBe(false);
     }),
   );
 

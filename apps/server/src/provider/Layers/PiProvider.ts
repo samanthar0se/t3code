@@ -29,6 +29,7 @@ const PI_PRESENTATION = {
   displayName: "Pi",
   badgeLabel: "Early Access",
   showInteractionModeToggle: false,
+  showRuntimeModeToggle: false,
 } as const;
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({ optionDescriptors: [] });
