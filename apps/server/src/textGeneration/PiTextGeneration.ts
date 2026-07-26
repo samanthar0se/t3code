@@ -103,6 +103,7 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
           "--mode",
           "rpc",
           "--no-session",
+          "--approve",
           "--no-tools",
           "--no-extensions",
           "--thinking",

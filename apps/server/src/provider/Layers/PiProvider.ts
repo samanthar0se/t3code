@@ -65,7 +65,7 @@ export const discoverPiModelsViaRpc = Effect.fn("discoverPiModelsViaRpc")(
   function* (piSettings: PiSettings, cwd: string, environment: NodeJS.ProcessEnv) {
     const transport = yield* makePiRpcTransport({
       binaryPath: piSettings.binaryPath || "pi",
-      args: ["--mode", "rpc", "--no-session"],
+      args: ["--mode", "rpc", "--no-session", "--approve"],
       cwd,
       env: environment,
       onExit: Effect.void,

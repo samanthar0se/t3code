@@ -1,14 +1,10 @@
 /** `ProviderAdapterShape` for the Pi coding agent (per-thread `pi --mode rpc` sessions). */
-import * as NodeURL from "node:url";
-
 import {
   ApprovalRequestId,
   type CanonicalItemType,
-  type CanonicalRequestType,
   EventId,
   type ModelSelection,
   type PiSettings,
-  type ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -57,7 +53,6 @@ import {
   piForkSucceeded,
   piImageContentFromBytes,
   type PiImageContent,
-  piResponseHasCommand,
   piResponseSucceeded,
   planPiModelSwitch,
   resolveForkTargetEntryId,
@@ -72,40 +67,10 @@ import {
 const PROVIDER = ProviderDriverKind.make("pi");
 
 const PI_STATE_TIMEOUT_MS = 5_000;
-const PI_COMMANDS_TIMEOUT_MS = 5_000;
 const PI_MESSAGES_TIMEOUT_MS = 5_000;
 // fork/new_session rebinds to a new session file — give it more headroom
 const PI_FORK_TIMEOUT_MS = 15_000;
 const PI_MODEL_OPTIONS_TIMEOUT_MS = 5_000;
-
-// keep in sync with SENTINEL_COMMAND in t3-approvals.ts
-const PI_APPROVAL_SENTINEL_COMMAND = "t3-approval-gate";
-
-// like Claude/Cursor: full-access runs ungated; approval-required and
-// auto-accept-edits gate via the bundled extension (Pi has no native per-tool approval)
-function approvalGateForRuntimeMode(
-  runtimeMode: ProviderSession["runtimeMode"],
-): { readonly gate: false } | { readonly gate: true; readonly mode: string } {
-  if (runtimeMode === "approval-required" || runtimeMode === "auto-accept-edits") {
-    return { gate: true, mode: runtimeMode };
-  }
-  return { gate: false };
-}
-
-// dev resolves ../assets (running from src); the vp-pack build copies the asset
-// next to the bundle, so prod resolves ./assets
-const APPROVAL_EXTENSION_CANDIDATES: ReadonlyArray<string> = (() => {
-  const resolve = (relative: string): string | undefined => {
-    try {
-      return NodeURL.fileURLToPath(new URL(relative, import.meta.url));
-    } catch {
-      return undefined;
-    }
-  };
-  return [resolve("../assets/pi/t3-approvals.ts"), resolve("./assets/pi/t3-approvals.ts")].filter(
-    (value): value is string => value !== undefined,
-  );
-})();
 
 interface PiToolItem {
   readonly id: RuntimeItemId;
@@ -120,11 +85,6 @@ interface PiTurnState {
   readonly items: Array<PiToolItem>;
 }
 
-interface PendingApproval {
-  readonly piId: string;
-  readonly requestType: CanonicalRequestType;
-}
-
 interface PendingUserInput {
   readonly piId: string;
   readonly questionId: string;
@@ -137,7 +97,6 @@ interface PiSessionContext {
   readonly sessionScope: Scope.Closeable;
   readonly transport: PiRpcTransport;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
-  readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly sendTurnSemaphore: Semaphore.Semaphore;
   turnState: PiTurnState | undefined;
@@ -173,20 +132,6 @@ export function classifyPiToolItemType(toolName: string): CanonicalItemType {
   return "dynamic_tool_call";
 }
 
-export function classifyPiApprovalRequestType(toolHint: string): CanonicalRequestType {
-  const item = classifyPiToolItemType(toolHint);
-  switch (item) {
-    case "command_execution":
-      return "command_execution_approval";
-    case "file_change":
-      return "file_change_approval";
-    default:
-      // a Pi confirm is a binary gate, not structured input; tool_user_input
-      // would be dropped by the runtime-ingestion + web approval pipeline
-      return "dynamic_tool_call";
-  }
-}
-
 export function summarizePiToolArgs(args: unknown): string | undefined {
   if (!args || typeof args !== "object") return undefined;
   const input = args as Record<string, unknown>;
@@ -215,17 +160,6 @@ export function parseNumberedList(
     if (match?.[1]) items.push(match[1]);
   }
   return items.length >= 2 ? { title: lines[0] ?? text, items } : null;
-}
-
-export function isPiApprovalConfirmed(decision: ProviderApprovalDecision): boolean {
-  return decision === "accept" || decision === "acceptForSession";
-}
-
-export function buildPiApprovalResponse(
-  piId: string,
-  decision: ProviderApprovalDecision,
-): RpcExtensionUIResponse {
-  return { type: "extension_ui_response", id: piId, confirmed: isPiApprovalConfirmed(decision) };
 }
 
 // numbered-list multi-select maps labels back to Pi's 1-based, comma-joined indices
@@ -294,16 +228,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fileSystem = yield* FileSystem.FileSystem;
   const baseEnvironment = options?.environment ?? process.env;
-
-  let approvalExtensionPath: string | undefined;
-  for (const candidate of APPROVAL_EXTENSION_CANDIDATES) {
-    const exists = yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false));
-    if (exists) {
-      approvalExtensionPath = candidate;
-      break;
-    }
-  }
-  const approvalExtensionAvailable = approvalExtensionPath !== undefined;
 
   const sessions = new Map<ThreadId, PiSessionContext>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
@@ -567,29 +491,22 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         return;
       }
 
+      // Pi is intentionally a full-access local provider. Confirmations from
+      // tools or project extensions are accepted immediately instead of being
+      // bridged into T3's approval-mode UI.
+      if (request.method === "confirm") {
+        yield* context.transport.writeExtensionResponse({
+          type: "extension_ui_response",
+          id: request.id,
+          confirmed: true,
+        });
+        return;
+      }
+
       const stamp = yield* makeEventStamp();
       const requestId = ApprovalRequestId.make(yield* nextUuid);
       const runtimeRequestId = RuntimeRequestId.make(requestId);
       const turnId = context.turnState?.turnId;
-
-      if (request.method === "confirm") {
-        const requestType = classifyPiApprovalRequestType(request.title);
-        const detail =
-          request.message.length > 0 ? `${request.title}\n${request.message}` : request.title;
-        context.pendingApprovals.set(requestId, { piId: request.id, requestType });
-        yield* offerRuntimeEvent({
-          ...stamp,
-          provider: PROVIDER,
-          providerInstanceId: boundInstanceId,
-          threadId: context.session.threadId,
-          ...(turnId ? { turnId } : {}),
-          requestId: runtimeRequestId,
-          type: "request.opened",
-          payload: { requestType, detail: detail.slice(0, 2000), args: request },
-          ...rawEvent("pi.rpc.extension-ui", request.method, request),
-        });
-        return;
-      }
 
       const questionId = String(requestId);
       let question: UserInputQuestion;
@@ -663,16 +580,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
   // settle+clear pending extension-UI requests so Pi is never left blocked
   const cancelPendingExtensionRequests = (context: PiSessionContext): Effect.Effect<void> =>
     Effect.gen(function* () {
-      for (const [, pending] of context.pendingApprovals) {
-        yield* Effect.ignore(
-          context.transport.writeExtensionResponse({
-            type: "extension_ui_response",
-            id: pending.piId,
-            confirmed: false,
-          }),
-        );
-      }
-      context.pendingApprovals.clear();
       for (const [, pending] of context.pendingUserInputs) {
         yield* Effect.ignore(
           context.transport.writeExtensionResponse({
@@ -861,28 +768,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
     const cwd = input.cwd ?? serverConfig.cwd;
     const thinkingLevel = resolvePiThinkingLevel(modelSelection);
 
-    const spawnArgs: string[] = ["--mode", "rpc"];
+    const spawnArgs: string[] = ["--mode", "rpc", "--approve"];
     if (resumeState) spawnArgs.push("--session", resumeState.sessionFile);
     if (modelSelection?.model) spawnArgs.push("--model", modelSelection.model);
     if (thinkingLevel) spawnArgs.push("--thinking", thinkingLevel);
-
-    // gate driven by runtimeMode; if required, must be provably active or we fail closed
-    const approvalGate = approvalGateForRuntimeMode(input.runtimeMode);
-    let processEnv = baseEnvironment;
-    let verifyApprovalGate = false;
-    if (approvalGate.gate) {
-      if (!approvalExtensionAvailable || !approvalExtensionPath) {
-        return yield* new ProviderAdapterProcessError({
-          provider: PROVIDER,
-          threadId,
-          detail:
-            "Tool approval is required for this runtime mode but the bundled approval gate is unavailable; refusing to start an ungated Pi session.",
-        });
-      }
-      spawnArgs.push("--extension", approvalExtensionPath);
-      processEnv = { ...baseEnvironment, T3_PI_APPROVAL_MODE: approvalGate.mode };
-      verifyApprovalGate = true;
-    }
 
     const sessionScope = yield* Scope.make();
 
@@ -891,7 +780,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       binaryPath: piSettings.binaryPath || "pi",
       args: spawnArgs,
       cwd,
-      env: processEnv,
+      env: baseEnvironment,
       onExit: Effect.suspend(() => {
         const live = sessions.get(threadId);
         if (live && !live.stopped && live.session.status !== "closed") {
@@ -919,7 +808,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       provider: PROVIDER,
       providerInstanceId: boundInstanceId,
       status: "ready",
-      runtimeMode: input.runtimeMode,
+      runtimeMode: "full-access",
       ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(modelSelection?.model ? { model: modelSelection.model } : {}),
       createdAt: startedAt,
@@ -932,7 +821,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       sessionScope,
       transport,
       notificationFiber: undefined,
-      pendingApprovals: new Map(),
       pendingUserInputs: new Map(),
       sendTurnSemaphore,
       turnState: undefined,
@@ -969,24 +857,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
     const sessionFile = extractSessionFile(stateResponse);
     if (sessionFile !== undefined) {
       context.session = { ...context.session, resumeCursor: { sessionFile } };
-    }
-
-    // fail closed unless the gate extension registered its sentinel command
-    if (verifyApprovalGate) {
-      const commandsResponse = yield* transport.request(
-        { type: "get_commands" },
-        `pi-get-commands-${yield* nextUuid}`,
-        PI_COMMANDS_TIMEOUT_MS,
-      );
-      if (!piResponseHasCommand(commandsResponse, PI_APPROVAL_SENTINEL_COMMAND)) {
-        yield* stopSessionInternal(context, { emitExitEvent: false });
-        return yield* new ProviderAdapterProcessError({
-          provider: PROVIDER,
-          threadId,
-          detail:
-            "Tool approval is enabled but the approval gate failed to load; refusing to run an ungated Pi session.",
-        });
-      }
     }
 
     if (yield* transport.isClosed) {
@@ -1124,30 +994,12 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
   );
 
   const respondToRequest: PiAdapterShape["respondToRequest"] = Effect.fn("respondToRequest")(
-    function* (threadId, requestId, decision: ProviderApprovalDecision) {
-      const context = yield* requireSession(threadId);
-      const pending = context.pendingApprovals.get(requestId);
-      if (!pending) {
-        return yield* new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: "respondToRequest",
-          detail: `Unknown pending approval request: ${requestId}.`,
-        });
-      }
-      const response: RpcExtensionUIResponse = buildPiApprovalResponse(pending.piId, decision);
-      yield* context.transport.writeExtensionResponse(response);
-      context.pendingApprovals.delete(requestId);
-
-      const stamp = yield* makeEventStamp();
-      yield* offerRuntimeEvent({
-        ...stamp,
-        type: "request.resolved",
+    function* (threadId) {
+      yield* requireSession(threadId);
+      return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        providerInstanceId: boundInstanceId,
-        threadId: context.session.threadId,
-        ...(context.turnState ? { turnId: context.turnState.turnId } : {}),
-        requestId: RuntimeRequestId.make(requestId),
-        payload: { requestType: pending.requestType, decision },
+        method: "respondToRequest",
+        detail: "Pi runs with full access and does not create approval requests.",
       });
     },
   );

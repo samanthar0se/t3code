@@ -1,12 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
-import type { ProviderApprovalDecision } from "@t3tools/contracts";
 
 import {
-  buildPiApprovalResponse,
   buildPiUserInputResponse,
-  classifyPiApprovalRequestType,
   classifyPiToolItemType,
-  isPiApprovalConfirmed,
   parseNumberedList,
   summarizePiToolArgs,
 } from "./PiAdapter.ts";
@@ -39,21 +35,6 @@ describe("classifyPiToolItemType", () => {
   });
 });
 
-describe("classifyPiApprovalRequestType", () => {
-  it("derives the approval request type from the tool hint", () => {
-    expect(classifyPiApprovalRequestType("bash")).toBe("command_execution_approval");
-    expect(classifyPiApprovalRequestType("write_file")).toBe("file_change_approval");
-    expect(classifyPiApprovalRequestType("Run bash?")).toBe("command_execution_approval");
-    expect(classifyPiApprovalRequestType("Run write?")).toBe("file_change_approval");
-  });
-
-  it("maps non-command/non-file tools to dynamic_tool_call (a surfaced approval)", () => {
-    expect(classifyPiApprovalRequestType("web_search")).toBe("dynamic_tool_call");
-    expect(classifyPiApprovalRequestType("mcp__server__tool")).toBe("dynamic_tool_call");
-    expect(classifyPiApprovalRequestType("some_unknown_tool")).toBe("dynamic_tool_call");
-  });
-});
-
 describe("summarizePiToolArgs", () => {
   it("prefers the command, then path, then pattern fields", () => {
     expect(summarizePiToolArgs({ command: "ls -la" })).toBe("ls -la");
@@ -79,30 +60,6 @@ describe("parseNumberedList", () => {
   it("returns null when fewer than two options are present", () => {
     expect(parseNumberedList("Just a title\n1. Only")).toBeNull();
     expect(parseNumberedList("No options here")).toBeNull();
-  });
-});
-
-describe("isPiApprovalConfirmed / buildPiApprovalResponse", () => {
-  it("confirms accept and acceptForSession, rejects everything else", () => {
-    expect(isPiApprovalConfirmed("accept")).toBe(true);
-    expect(isPiApprovalConfirmed("acceptForSession")).toBe(true);
-    expect(isPiApprovalConfirmed("decline")).toBe(false);
-    expect(isPiApprovalConfirmed("cancel")).toBe(false);
-  });
-
-  it("round-trips a confirm request into an extension_ui_response", () => {
-    expect(classifyPiApprovalRequestType("bash")).toBe("command_execution_approval");
-    expect(buildPiApprovalResponse("ui-42", "accept")).toEqual({
-      type: "extension_ui_response",
-      id: "ui-42",
-      confirmed: true,
-    });
-    const decline: ProviderApprovalDecision = "decline";
-    expect(buildPiApprovalResponse("ui-42", decline)).toEqual({
-      type: "extension_ui_response",
-      id: "ui-42",
-      confirmed: false,
-    });
   });
 });
 

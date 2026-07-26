@@ -26,6 +26,7 @@ import type { PiAdapterShape } from "../Services/PiAdapter.ts";
 import { makePiAdapter } from "./PiAdapter.ts";
 import type {
   AgentSessionEvent,
+  MakePiRpcTransportOptions,
   PiRpcTransport,
   PiStdoutMessage,
   PiTurnCommand,
@@ -46,6 +47,7 @@ interface FakePiTransport {
   readonly transport: PiRpcTransport;
   readonly commands: Array<RpcCommand>;
   readonly extensionResponses: Array<RpcExtensionUIResponse>;
+  readonly takeExtensionResponse: Effect.Effect<RpcExtensionUIResponse>;
   readonly pushEvent: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly pushExtensionUI: (request: RpcExtensionUIRequest) => Effect.Effect<void>;
   readonly setResponse: (commandType: string, response: RpcResponse) => void;
@@ -63,6 +65,7 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
   const messages = yield* Queue.unbounded<PiStdoutMessage, Cause.Done<void>>();
   const commands: Array<RpcCommand> = [];
   const extensionResponses: Array<RpcExtensionUIResponse> = [];
+  const extensionResponseQueue = yield* Queue.unbounded<RpcExtensionUIResponse>();
   const responses = new Map<string, RpcResponse>();
   const requestGates = new Map<
     string,
@@ -111,7 +114,7 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
         }
         return Effect.sync(() => {
           extensionResponses.push(response);
-        });
+        }).pipe(Effect.andThen(Queue.offer(extensionResponseQueue, response)), Effect.asVoid);
       }),
     request: (command) =>
       Effect.gen(function* () {
@@ -133,6 +136,7 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
     transport,
     commands,
     extensionResponses,
+    takeExtensionResponse: Queue.take(extensionResponseQueue),
     pushEvent: (event) => Queue.offer(messages, { _tag: "event", event }).pipe(Effect.asVoid),
     pushExtensionUI: (request) =>
       Queue.offer(messages, { _tag: "extension-ui", request }).pipe(Effect.asVoid),
@@ -151,10 +155,15 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
 const makePiAdapterForTest = (settings: PiSettings) =>
   Effect.gen(function* () {
     const fake = yield* makeFakePiRpcTransport;
+    let launchOptions: MakePiRpcTransportOptions | undefined;
     const adapter = yield* makePiAdapter(settings, {
-      makeTransport: () => Effect.succeed(fake.transport),
+      makeTransport: (options) =>
+        Effect.sync(() => {
+          launchOptions = options;
+          return fake.transport;
+        }),
     });
-    return { adapter, fake } as const;
+    return { adapter, fake, getLaunchOptions: () => launchOptions } as const;
   });
 
 const collectEvents = (
@@ -485,39 +494,21 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
     }),
   );
 
-  it.effect("bridges a confirm request to an approval round-trip", () =>
+  it.effect("runs fully trusted and automatically confirms extension requests", () =>
     Effect.gen(function* () {
-      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
+      const { adapter, fake, getLaunchOptions } = yield* makePiAdapterForTest(enabledSettings());
       const threadId = ThreadId.make("pi-int-approval");
-      const store = yield* Ref.make<Array<ProviderRuntimeEvent>>([]);
-      const opened = yield* Deferred.make<ApprovalRequestId>();
-      const resolved = yield* Deferred.make<void>();
-      const fiber = yield* adapter.streamEvents.pipe(
-        Stream.filter((event) => event.threadId === threadId),
-        Stream.runForEach((event) =>
-          Effect.gen(function* () {
-            yield* Ref.update(store, (events) => [...events, event]);
-            if (event.type === "request.opened" && event.requestId !== undefined) {
-              yield* Deferred.succeed(opened, ApprovalRequestId.make(String(event.requestId))).pipe(
-                Effect.ignore,
-              );
-            }
-            if (event.type === "request.resolved") {
-              yield* Deferred.succeed(resolved, undefined).pipe(Effect.ignore);
-            }
-          }),
-        ),
-        Effect.forkChild,
-      );
 
-      yield* adapter.startSession({
+      const session = yield* adapter.startSession({
         threadId,
         provider: PI,
         cwd: process.cwd(),
-        runtimeMode: "full-access",
+        runtimeMode: "approval-required",
       });
-      yield* adapter.sendTurn({ threadId, input: "edit file", attachments: [] });
-      yield* fake.pushEvent({ type: "turn_start" } as AgentSessionEvent);
+      expect(session.runtimeMode).toBe("full-access");
+      expect(getLaunchOptions()?.args).toContain("--approve");
+      expect(getLaunchOptions()?.args).not.toContain("--extension");
+
       yield* fake.pushExtensionUI({
         type: "extension_ui_request",
         id: "ui-1",
@@ -526,29 +517,12 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
         message: "ls -la",
       } as RpcExtensionUIRequest);
 
-      const requestId = yield* Deferred.await(opened);
-      fake.failNextWrite();
-      const firstAttempt = yield* adapter
-        .respondToRequest(threadId, requestId, "accept")
-        .pipe(Effect.exit);
-      expect(Exit.isFailure(firstAttempt)).toBe(true);
-      expect(fake.extensionResponses).toHaveLength(0);
-
-      yield* adapter.respondToRequest(threadId, requestId, "accept");
-      yield* Deferred.await(resolved);
-      yield* Fiber.interrupt(fiber);
-
-      const events = yield* Ref.get(store);
-      const requestOpened = events.find((event) => event.type === "request.opened");
-      expect(requestOpened).toBeDefined();
-      if (requestOpened && requestOpened.type === "request.opened") {
-        expect(requestOpened.raw?.source).toBe("pi.rpc.extension-ui");
-      }
-      expect(fake.extensionResponses).toContainEqual({
+      expect(yield* fake.takeExtensionResponse).toEqual({
         type: "extension_ui_response",
         id: "ui-1",
         confirmed: true,
       });
+      yield* adapter.stopSession(threadId);
     }),
   );
 
@@ -621,35 +595,6 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
           (response) => "value" in response && response.value === "Option A",
         ),
       ).toBe(true);
-    }),
-  );
-
-  it.effect("fails closed when the approval gate does not load", () =>
-    Effect.gen(function* () {
-      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
-      fake.setResponse(
-        "get_commands",
-        asResponse({
-          type: "response",
-          id: "x",
-          command: "get_commands",
-          success: true,
-          data: { commands: [] },
-        }),
-      );
-      const threadId = ThreadId.make("pi-int-failclosed");
-      const result = yield* adapter
-        .startSession({
-          threadId,
-          provider: PI,
-          cwd: process.cwd(),
-          runtimeMode: "approval-required",
-        })
-        .pipe(Effect.result);
-      expect(Result.isFailure(result)).toBe(true);
-      if (Result.isFailure(result)) {
-        expect(String(result.failure.message)).toMatch(/approval gate|ungated/i);
-      }
     }),
   );
 
