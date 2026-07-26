@@ -297,6 +297,53 @@ export function extractAvailableModels(
   return Array.isArray(models) ? (models as ReadonlyArray<ModelInfo>) : [];
 }
 
+export type PiAvailableCommand = {
+  readonly name: string;
+  readonly description?: string;
+  readonly source: "extension" | "prompt" | "skill";
+  readonly location?: "user" | "project" | "path";
+  readonly path?: string;
+};
+
+export function extractAvailableCommands(
+  response: RpcResponse | undefined,
+): ReadonlyArray<PiAvailableCommand> {
+  const commands = piResponseData(response)?.["commands"];
+  if (!Array.isArray(commands)) return [];
+
+  return commands.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const command = entry as Record<string, unknown>;
+    const name = typeof command["name"] === "string" ? command["name"].trim() : "";
+    const source = command["source"];
+    if (!name || (source !== "extension" && source !== "prompt" && source !== "skill")) {
+      return [];
+    }
+
+    const description =
+      typeof command["description"] === "string" && command["description"].trim()
+        ? command["description"].trim()
+        : undefined;
+    const location = command["location"];
+    const path =
+      typeof command["path"] === "string" && command["path"].trim()
+        ? command["path"].trim()
+        : undefined;
+
+    return [
+      {
+        name,
+        source,
+        ...(description ? { description } : {}),
+        ...(location === "user" || location === "project" || location === "path"
+          ? { location }
+          : {}),
+        ...(path ? { path } : {}),
+      } satisfies PiAvailableCommand,
+    ];
+  });
+}
+
 // approval-gate handshake: the sentinel command's presence confirms the gate loaded
 export function piResponseHasCommand(
   response: RpcResponse | undefined,

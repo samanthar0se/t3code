@@ -66,6 +66,15 @@ If discovery fails or times out, T3 Code falls back to your custom models only. 
 models with the Pi CLI (`pi config`) or by editing `~/.pi/agent/models.json`, then refresh
 provider status in Settings.
 
+## Commands And Skills
+
+T3 Code also discovers the commands exposed by Pi's RPC mode. Type `/` in the composer to
+browse Pi extension commands and prompt templates, or type `$` to browse Pi skills.
+
+Interactive-only Pi commands such as `/settings` and `/hotkeys` are not available because Pi
+does not expose or execute them in RPC mode. Project commands and skills appear only when Pi's
+project trust policy allows project-local resources to load.
+
 ## How Tool Approval Works
 
 Pi has no built-in per-tool approval prompt, so T3 Code adds one with a small bundled Pi
