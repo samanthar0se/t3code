@@ -8,6 +8,7 @@ import { defineConfig } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 
 import { loadRepoEnv } from "../../scripts/lib/public-config";
+import { forkBranding } from "./forkBranding";
 
 const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
@@ -91,6 +92,7 @@ const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
 export default defineConfig(() => {
   return {
     plugins: [
+      forkBranding(),
       tanstackRouter(),
       react(),
       babel({
