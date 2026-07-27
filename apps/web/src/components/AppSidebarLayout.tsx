@@ -161,7 +161,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate, pathname]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
+    <SidebarProvider className="h-full! min-h-0!" defaultOpen style={sidebarProviderStyle}>
       <Sidebar
         side="left"
         collapsible="offcanvas"

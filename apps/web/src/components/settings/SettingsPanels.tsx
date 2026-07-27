@@ -21,6 +21,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
+  APP_ZOOM_OPTIONS,
   DEFAULT_UNIFIED_SETTINGS,
   MAX_GLASS_OPACITY,
   MIN_GLASS_OPACITY,
@@ -119,6 +120,10 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const APP_ZOOM_LABELS = Object.fromEntries(
+  APP_ZOOM_OPTIONS.map((zoom) => [zoom, `${zoom}%`]),
+) as Record<(typeof APP_ZOOM_OPTIONS)[number], string>;
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
@@ -400,6 +405,7 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
+      ...(settings.appZoom !== DEFAULT_UNIFIED_SETTINGS.appZoom ? ["Zoom"] : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
@@ -454,6 +460,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     [
       isGitWritingModelDirty,
       settings.autoOpenPlanSidebar,
+      settings.appZoom,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
@@ -485,6 +492,7 @@ export function useSettingsRestore(onRestored?: () => void) {
 
     setTheme("system");
     updateSettings({
+      appZoom: DEFAULT_UNIFIED_SETTINGS.appZoom,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       showProviderUsageInContextPopover: DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover,
@@ -587,6 +595,41 @@ export function GeneralSettingsPanel() {
                 {THEME_OPTIONS.map((option) => (
                   <SelectItem hideIndicator key={option.value} value={option.value}>
                     {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Zoom"
+          description="Scale the T3 Code interface on this device."
+          resetAction={
+            settings.appZoom !== DEFAULT_UNIFIED_SETTINGS.appZoom ? (
+              <SettingResetButton
+                label="zoom"
+                onClick={() => updateSettings({ appZoom: DEFAULT_UNIFIED_SETTINGS.appZoom })}
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={String(settings.appZoom)}
+              onValueChange={(value) => {
+                const appZoom = APP_ZOOM_OPTIONS.find((option) => option === Number(value));
+                if (appZoom !== undefined) {
+                  updateSettings({ appZoom });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Interface zoom">
+                <SelectValue>{APP_ZOOM_LABELS[settings.appZoom]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {APP_ZOOM_OPTIONS.map((zoom) => (
+                  <SelectItem hideIndicator key={zoom} value={String(zoom)}>
+                    {APP_ZOOM_LABELS[zoom]}
                   </SelectItem>
                 ))}
               </SelectPopup>

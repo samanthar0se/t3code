@@ -49,6 +49,22 @@ describe("ClientSettings glass opacity", () => {
   });
 });
 
+describe("ClientSettings app zoom", () => {
+  it("defaults to 100%", () => {
+    expect(decodeClientSettings({}).appZoom).toBe(100);
+  });
+
+  it.each([75, 80, 90, 100, 110, 125, 150])("accepts a supported zoom: %s", (value) => {
+    expect(decodeClientSettings({ appZoom: value }).appZoom).toBe(value);
+    expect(decodeClientSettingsPatch({ appZoom: value }).appZoom).toBe(value);
+  });
+
+  it.each([50, 95, 200])("rejects an unsupported zoom: %s", (value) => {
+    expect(() => decodeClientSettings({ appZoom: value })).toThrow();
+    expect(() => decodeClientSettingsPatch({ appZoom: value })).toThrow();
+  });
+});
+
 describe("ClientSettings sidebar v2", () => {
   it("defaults the beta off with a three-day auto-settle threshold", () => {
     const settings = decodeClientSettings({});
