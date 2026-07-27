@@ -85,8 +85,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    // Fork-only: apps/desktop/package.json ships the "Codey" product name.
-    assert.equal(resolveDesktopProductName("0.0.17"), "Codey");
+    // Fork-only: apps/desktop/package.json ships the "Code" product name.
+    assert.equal(resolveDesktopProductName("0.0.17"), "Code");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
   });
 

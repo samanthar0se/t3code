@@ -16,7 +16,7 @@ const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
 // Fork-only cosmetic rebrand; the bundle id below intentionally stays upstream.
-export const APP_DISPLAY_NAME = isDevelopment ? "Codey (Dev)" : "Codey";
+export const APP_DISPLAY_NAME = isDevelopment ? "Code (Dev)" : "Code";
 export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";

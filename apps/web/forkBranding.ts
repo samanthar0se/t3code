@@ -1,7 +1,7 @@
 /**
  * Fork-only cosmetic rebrand.
  *
- * This fork ships as "Codey" but deliberately keeps the upstream `t3code`
+ * This fork ships as "Code" but deliberately keeps the upstream `t3code`
  * naming everywhere in source, so merges from upstream stay conflict-free.
  * Instead of editing the ~60 hardcoded "T3 Code" literals scattered across the
  * client, we rewrite the display name at build/dev time. New upstream strings
@@ -14,8 +14,8 @@
 // The stable channel ships unsuffixed, so the baked-in "(Alpha)" goes too.
 // Ordered: the suffixed form has to match before the bare one.
 const REWRITES = [
-  [/T3 Code \(Alpha\)/g, "Codey"],
-  [/T3 Code/g, "Codey"],
+  [/T3 Code \(Alpha\)/g, "Code"],
+  [/T3 Code/g, "Code"],
 ] as const;
 
 function rebrand(input: string): string {

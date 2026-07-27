@@ -78,7 +78,7 @@ export class DesktopEnvironment extends Context.Service<
 
 // Fork-only cosmetic rebrand. Upstream ships "T3 Code"; everything else in the
 // repo (bundle ids, protocol schemes, user-data dirs) keeps the upstream name.
-const APP_BASE_NAME = "Codey";
+const APP_BASE_NAME = "Code";
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;

@@ -51,7 +51,7 @@ Do not edit the generated PNG or ICO files directly.
 
 ## Fork note
 
-This fork ships the `>_` mark in `dev/app-icon.icon` and rebrands the client UI to "Codey".
+This fork ships the `>_` mark in `dev/app-icon.icon` and rebrands the client UI to "Code".
 Because Icon Composer is macOS-only, the tracked `dev/` rasters (plus the `apps/web/public`
 copies and `apps/desktop/resources/icon.{png,ico}`) were regenerated with
 `node scripts/fork-render-brand-icons.mjs`, which renders the same layer stack in headless
