@@ -1,0 +1,260 @@
+# Personal-fork desktop nightly.
+#
+# Builds only what this fork actually distributes: Windows x64 and macOS arm64
+# desktop installers, published as a GitHub prerelease that electron-updater
+# reads from this repository.
+#
+# Deliberately omits everything in release.yml that exists for the upstream
+# hosted product: the Cloudflare/Clerk relay config job, the `t3` npm publish,
+# and the Vercel web deploy. Clients here reach the host directly (LAN/VPN),
+# so no T3 Connect pairing config needs to be baked into the build.
+#
+# Requires no secrets or repository variables. Builds are unsigned.
+
+name: Desktop Nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 07:00 UTC daily. Skips automatically when main has not moved.
+    - cron: "0 7 * * *"
+
+concurrency:
+  group: desktop-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+      should_build: ${{ steps.meta.outputs.should_build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: meta
+        name: Resolve nightly version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_STARTED_AT: ${{ github.run_started_at }}
+        run: |
+          set -euo pipefail
+
+          # On the cron schedule, skip when HEAD already has a nightly tag.
+          # Manual dispatch always builds.
+          should_build=true
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            last_tag="$(git tag --list 'v*-nightly.*' --sort=-creatordate | head -n 1)"
+            if [[ -n "$last_tag" ]] \
+              && [[ "$(git rev-parse "$last_tag^{commit}")" == "$(git rev-parse HEAD)" ]]; then
+              echo "No changes since $last_tag. Skipping."
+              should_build=false
+            fi
+          fi
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+
+          # Mirrors scripts/resolve-nightly-release.ts: the desktop package
+          # version with patch bumped, then `-nightly.<YYYYMMDD>.<run>`. The
+          # suffix shape is load-bearing — resolveDesktopUpdateChannel() in
+          # scripts/build-desktop-artifact.ts matches /-nightly\.\d{8}\.\d+$/
+          # to select the `nightly` updater channel and the nightly icons.
+          base="$(node -p "require('./apps/desktop/package.json').version.replace(/[-+].*$/, '')")"
+          if [[ ! "$base" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Unexpected desktop package version '$base'." >&2
+            exit 1
+          fi
+          next="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$(( BASH_REMATCH[3] + 1 ))"
+          date="$(date -u -d "$RUN_STARTED_AT" +%Y%m%d)"
+          version="$next-nightly.$date.$RUN_NUMBER"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "name=Code Nightly $version (${GITHUB_SHA:0:12})" >> "$GITHUB_OUTPUT"
+          echo "Building $version"
+
+  # node-pty ships no Linux prebuilt, and the Windows app's WSL backend runs
+  # under the distro's own Linux Node. Build that binary here and hand it to
+  # the Windows packaging job so the shipped WSL backend needs no compiler on
+  # the user's machine.
+  wsl_node_pty:
+    name: Build WSL node-pty (linux-x64)
+    needs: [version]
+    if: needs.version.outputs.should_build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Build node-pty linux-x64 prebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
+          pty_dir="$(dirname "$pty_pkg")"
+          ( cd "$pty_dir" && npx --yes node-gyp rebuild )
+          mkdir -p wsl-prebuild
+          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
+          file wsl-prebuild/pty.node
+
+      - name: Upload node-pty linux-x64 prebuild
+        uses: actions/upload-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild/pty.node
+          if-no-files-found: error
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: [version, wsl_node_pty]
+    if: ${{ !cancelled() && needs.version.outputs.should_build == 'true' && needs.version.result == 'success' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64
+            runner: windows-2025
+            platform: win
+            target: nsis
+            arch: x64
+          - label: macOS arm64
+            runner: macos-15
+            platform: mac
+            target: dmg
+            arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.version.outputs.version }}"
+
+      - name: Download WSL node-pty prebuild
+        if: matrix.platform == 'win'
+        uses: actions/download-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild
+
+      - name: Install Spectre-mitigated MSVC libs
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru -NoNewWindow
+          if ($null -eq $proc -or $proc.ExitCode -ne 0) {
+            $code = if ($null -ne $proc) { $proc.ExitCode } else { 1 }
+            Write-Error "Visual Studio Installer failed with exit code $code"
+            exit $code
+          }
+
+      # Unsigned. GITHUB_REPOSITORY makes resolveGitHubPublishConfig() point
+      # electron-updater at this fork's releases, so no feed URL is needed.
+      - name: Build desktop artifact
+        shell: bash
+        run: |
+          args=(
+            --platform "${{ matrix.platform }}"
+            --target "${{ matrix.target }}"
+            --arch "${{ matrix.arch }}"
+            --build-version "${{ needs.version.outputs.version }}"
+            --verbose
+          )
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            args+=(--wsl-prebuild "$GITHUB_WORKSPACE/wsl-prebuild/pty.node")
+          fi
+          vp run dist:desktop:artifact "${args[@]}"
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-publish
+          shopt -s nullglob
+          for pattern in \
+            "release/*.dmg" \
+            "release/*.zip" \
+            "release/*.exe" \
+            "release/*.blockmap" \
+            "release/*.yml"; do
+            for file in $pattern; do
+              cp "$file" release-publish/
+            done
+          done
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-publish/*
+          if-no-files-found: error
+
+  release:
+    name: Publish prerelease
+    needs: [version, build]
+    if: ${{ !failure() && !cancelled() && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-assets
+
+      # Only macOS arm64 is built, so its manifest is already the canonical
+      # `*-mac.yml`. Add the x64 matrix entry back and this needs the
+      # merge-update-manifests.ts step from release.yml.
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.version.outputs.name }}
+          generate_release_notes: true
+          prerelease: true
+          make_latest: false
+          files: |
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.exe
+            release-assets/*.blockmap
+            release-assets/*.yml
+          fail_on_unmatched_files: true
+          token: ${{ secrets.GITHUB_TOKEN }}
