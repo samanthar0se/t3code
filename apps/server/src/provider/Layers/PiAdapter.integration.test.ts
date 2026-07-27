@@ -525,6 +525,78 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
     }),
   );
 
+  it.effect("closes the active assistant segment before a tool starts", () =>
+    Effect.gen(function* () {
+      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
+      const threadId = ThreadId.make("pi-int-assistant-segment-tool-boundary");
+      const collected = yield* collectEvents(
+        adapter,
+        threadId,
+        (event) => event.type === "turn.completed",
+      );
+      yield* adapter.startSession({
+        threadId,
+        provider: PI,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "talk then use a tool", attachments: [] });
+      yield* fake.pushEvent({ type: "turn_start" } as AgentSessionEvent);
+      yield* fake.pushEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "before tool" },
+      } as AgentSessionEvent);
+      yield* fake.pushEvent({
+        type: "tool_execution_start",
+        toolCallId: "t-boundary",
+        toolName: "bash",
+        args: { command: "pwd" },
+      } as AgentSessionEvent);
+      yield* fake.pushEvent({
+        type: "tool_execution_end",
+        toolCallId: "t-boundary",
+        toolName: "bash",
+        result: "/workspace",
+        isError: false,
+      } as AgentSessionEvent);
+      yield* fake.pushEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: " after tool" },
+      } as AgentSessionEvent);
+      yield* fake.pushEvent({ type: "agent_end" } as AgentSessionEvent);
+
+      const events = yield* Fiber.join(collected.fiber).pipe(
+        Effect.flatMap(() => Ref.get(collected.store)),
+      );
+      const assistantCompletionIndex = events.findIndex(
+        (event) =>
+          event.type === "item.completed" &&
+          event.payload.itemType === "assistant_message",
+      );
+      const toolStartIndex = events.findIndex(
+        (event) =>
+          event.type === "item.started" &&
+          event.itemId === "t-boundary" &&
+          event.payload.itemType === "command_execution",
+      );
+      const assistantDeltas = events.filter(
+        (event): event is Extract<ProviderRuntimeEvent, { type: "content.delta" }> =>
+          event.type === "content.delta" && event.payload.streamKind === "assistant_text",
+      );
+      const assistantCompletion = assistantCompletionIndex >= 0 ? events[assistantCompletionIndex] : undefined;
+
+      expect(assistantCompletionIndex).toBeGreaterThanOrEqual(0);
+      expect(toolStartIndex).toBeGreaterThan(assistantCompletionIndex);
+      expect(assistantDeltas).toHaveLength(2);
+      expect(assistantDeltas[0]?.payload.delta).toBe("before tool");
+      expect(assistantDeltas[1]?.payload.delta).toBe(" after tool");
+      expect(assistantDeltas[0]?.itemId).toMatch(/^pi-assistant:.*:segment:0$/);
+      expect(assistantDeltas[1]?.itemId).toMatch(/^pi-assistant:.*:segment:1$/);
+      expect(assistantDeltas[0]?.itemId).not.toBe(assistantDeltas[1]?.itemId);
+      expect(assistantCompletion?.itemId).toBe(assistantDeltas[0]?.itemId);
+    }),
+  );
+
   it.effect("uses unknown stream deltas for non-command, non-file tools", () =>
     Effect.gen(function* () {
       const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());

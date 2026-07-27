@@ -86,6 +86,8 @@ interface PiTurnState {
   readonly turnId: TurnId;
   readonly startedAt: string;
   readonly items: Array<PiToolItem>;
+  assistantSegmentIndex: number;
+  activeAssistantItemId: RuntimeItemId | undefined;
 }
 
 interface PendingUserInput {
@@ -280,11 +282,62 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       });
     });
 
+  const ensureActiveAssistantItemId = (
+    context: PiSessionContext,
+  ): Effect.Effect<RuntimeItemId | undefined> =>
+    Effect.sync(() => {
+      const turnState = context.turnState;
+      if (!turnState) return undefined;
+      if (turnState.activeAssistantItemId) {
+        return turnState.activeAssistantItemId;
+      }
+      const itemId = RuntimeItemId.make(
+        `pi-assistant:${turnState.turnId}:segment:${turnState.assistantSegmentIndex}`,
+      );
+      turnState.assistantSegmentIndex += 1;
+      turnState.activeAssistantItemId = itemId;
+      return itemId;
+    });
+
+  const closeActiveAssistantSegment = (
+    context: PiSessionContext,
+    base: {
+      readonly eventId: EventId;
+      readonly createdAt: string;
+      readonly provider: ProviderDriverKind;
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly threadId: ThreadId;
+      readonly raw?: { readonly source: "pi.rpc.event" | "pi.rpc.extension-ui"; readonly method: string; readonly payload: unknown };
+    },
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const turnState = context.turnState;
+      const assistantItemId = turnState?.activeAssistantItemId;
+      if (!turnState || !assistantItemId) return;
+      turnState.activeAssistantItemId = undefined;
+      yield* offerRuntimeEvent({
+        ...base,
+        turnId: turnState.turnId,
+        itemId: assistantItemId,
+        type: "item.completed",
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+        },
+      });
+    });
+
   const openTurn = (context: PiSessionContext): Effect.Effect<TurnId> =>
     Effect.gen(function* () {
       const turnId = TurnId.make(yield* nextUuid);
       const startedAt = yield* nowIso;
-      context.turnState = { turnId, startedAt, items: [] };
+      context.turnState = {
+        turnId,
+        startedAt,
+        items: [],
+        assistantSegmentIndex: 0,
+        activeAssistantItemId: undefined,
+      };
       context.session = {
         ...context.session,
         status: "running",
@@ -339,9 +392,11 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
           if (!context.turnState) return;
           const text = extractAssistantTextDelta(event);
           if (text !== null) {
+            const itemId = yield* ensureActiveAssistantItemId(context);
             yield* offerRuntimeEvent({
               ...base,
               turnId: context.turnState.turnId,
+              ...(itemId ? { itemId } : {}),
               type: "content.delta",
               payload: { streamKind: "assistant_text", delta: text },
             });
@@ -361,6 +416,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
 
         case "tool_execution_start": {
           if (!context.turnState) return;
+          yield* closeActiveAssistantSegment(context, base);
           const itemId = RuntimeItemId.make(event.toolCallId);
           const itemType = classifyPiToolItemType(event.toolName);
           const detail = summarizePiToolArgs(event.args);
