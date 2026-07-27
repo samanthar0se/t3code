@@ -24,6 +24,7 @@ import {
   type AuthPairingLink,
   type AdvertisedEndpoint,
   type DesktopDiscoveredSshHost,
+  type DesktopRuntimeMode,
   type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type DesktopWslState,
@@ -1711,6 +1712,12 @@ function CloudRemoteEnvironmentRows({
 
 export function ConnectionsSettings() {
   const desktopBridge = window.desktopBridge;
+  const [desktopRuntimeMode, setDesktopRuntimeMode] = useState<DesktopRuntimeMode | null>(() =>
+    desktopBridge ? desktopBridge.getRuntimeMode() : null,
+  );
+  const [pendingDesktopRuntimeMode, setPendingDesktopRuntimeMode] =
+    useState<DesktopRuntimeMode | null>(null);
+  const [isUpdatingDesktopRuntimeMode, setIsUpdatingDesktopRuntimeMode] = useState(false);
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
   const connectPairing = useAtomCommand(connectPairingAtom, { reportFailure: false });
@@ -1721,11 +1728,12 @@ export function ConnectionsSettings() {
   const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
   const primarySessionState = usePrimarySessionState();
-  const currentSessionScopes = desktopBridge
-    ? AuthAdministrativeScopes
-    : primarySessionState.data?.authenticated
-      ? (primarySessionState.data.scopes ?? null)
-      : null;
+  const currentSessionScopes =
+    desktopBridge && desktopRuntimeMode !== "client-only"
+      ? AuthAdministrativeScopes
+      : primarySessionState.data?.authenticated
+        ? (primarySessionState.data.scopes ?? null)
+        : null;
   const currentAuthPolicy = desktopBridge ? null : (primarySessionState.data?.auth.policy ?? null);
   const savedEnvironments = useMemo(
     () =>
@@ -2697,6 +2705,24 @@ export function ConnectionsSettings() {
     [desktopBridge, desktopWslState],
   );
 
+  const handleConfirmDesktopRuntimeModeChange = useCallback(async () => {
+    if (!desktopBridge || pendingDesktopRuntimeMode === null) return;
+    setIsUpdatingDesktopRuntimeMode(true);
+    try {
+      const mode = await desktopBridge.setRuntimeMode(pendingDesktopRuntimeMode);
+      setDesktopRuntimeMode(mode);
+      setPendingDesktopRuntimeMode(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to change desktop mode.";
+      toastManager.add({
+        type: "error",
+        title: "Could not change desktop mode",
+        description: message,
+      });
+      setIsUpdatingDesktopRuntimeMode(false);
+    }
+  }, [desktopBridge, pendingDesktopRuntimeMode]);
+
   const handleConfirmWslChange = useCallback(() => {
     if (!desktopBridge || !pendingWslChange) return;
     const change = pendingWslChange;
@@ -2977,6 +3003,28 @@ export function ConnectionsSettings() {
 
   return (
     <SettingsPageContainer>
+      {desktopBridge && desktopRuntimeMode ? (
+        <SettingsSection title="Desktop runtime">
+          <SettingsRow
+            title="Client only"
+            description={
+              desktopRuntimeMode === "client-only"
+                ? "No local T3 server is running. Projects, files, terminals, Git state, and provider sessions come only from saved remote environments."
+                : "Turn off this device's T3 server and use the desktop app only as a client for saved remote environments. The app restarts when you change this."
+            }
+            control={
+              <Switch
+                checked={desktopRuntimeMode === "client-only"}
+                disabled={isUpdatingDesktopRuntimeMode}
+                onCheckedChange={(enabled) =>
+                  setPendingDesktopRuntimeMode(enabled ? "client-only" : "host-and-client")
+                }
+                aria-label="Run desktop in client-only mode"
+              />
+            }
+          />
+        </SettingsSection>
+      ) : null}
       {canManageLocalBackend ? (
         <>
           <SettingsSection title="This environment">
@@ -3393,6 +3441,50 @@ export function ConnectionsSettings() {
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      <AlertDialog
+        open={pendingDesktopRuntimeMode !== null}
+        onOpenChange={(open) => {
+          if (!open && !isUpdatingDesktopRuntimeMode) {
+            setPendingDesktopRuntimeMode(null);
+          }
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDesktopRuntimeMode === "client-only"
+                ? "Switch to client-only mode?"
+                : "Start the local server?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDesktopRuntimeMode === "client-only"
+                ? "T3 Code will restart without a local server. Local projects will remain on this device but will be hidden until you turn the local server back on."
+                : "T3 Code will restart and run its local server again. Local projects and threads will become available."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose
+              disabled={isUpdatingDesktopRuntimeMode}
+              render={<Button variant="outline" disabled={isUpdatingDesktopRuntimeMode} />}
+            >
+              Cancel
+            </AlertDialogClose>
+            <Button
+              onClick={() => void handleConfirmDesktopRuntimeModeChange()}
+              disabled={pendingDesktopRuntimeMode === null || isUpdatingDesktopRuntimeMode}
+            >
+              {isUpdatingDesktopRuntimeMode ? (
+                <>
+                  <Spinner className="size-3.5" />
+                  Restarting…
+                </>
+              ) : (
+                "Restart"
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
     </SettingsPageContainer>
   );
 }

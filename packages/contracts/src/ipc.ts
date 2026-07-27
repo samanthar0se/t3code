@@ -162,6 +162,7 @@ export type DesktopUpdateStatus =
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
 export type DesktopUpdateChannel = "latest" | "nightly";
+export type DesktopRuntimeMode = "host-and-client" | "client-only";
 export type DesktopAppStageLabel = "Alpha" | "Dev" | "Nightly";
 
 export const DesktopUpdateStatusSchema = Schema.Literals([
@@ -177,6 +178,7 @@ export const DesktopUpdateStatusSchema = Schema.Literals([
 export const DesktopRuntimeArchSchema = Schema.Literals(["arm64", "x64", "other"]);
 export const DesktopThemeSchema = Schema.Literals(["light", "dark", "system"]);
 export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "nightly"]);
+export const DesktopRuntimeModeSchema = Schema.Literals(["host-and-client", "client-only"]);
 export const DesktopAppStageLabelSchema = Schema.Literals(["Alpha", "Dev", "Nightly"]);
 
 export interface DesktopAppBranding {
@@ -974,6 +976,8 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
 
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
+  getRuntimeMode: () => DesktopRuntimeMode;
+  setRuntimeMode: (mode: DesktopRuntimeMode) => Promise<DesktopRuntimeMode>;
   // One bootstrap per pool instance currently registered with bootstrap
   // info (omits instances whose backend hasn't produced a config yet).
   // The primary backend is identified by id === PRIMARY_LOCAL_ENVIRONMENT_ID.

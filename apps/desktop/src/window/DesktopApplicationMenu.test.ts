@@ -75,6 +75,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     createMainIfBackendReady: Effect.void,
     showConnectingSplash: Effect.void,
     handleBackendReady: () => Effect.void,
+    handleClientReady: Effect.void,
     handleBackendNotReady: Effect.void,
     flushMainWindowBounds: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),

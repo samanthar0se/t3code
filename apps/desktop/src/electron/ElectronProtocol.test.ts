@@ -1,6 +1,10 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import { beforeEach, vi } from "vite-plus/test";
 
 const { handleMock, netFetchMock, unhandleMock } = vi.hoisted(() => ({
@@ -15,6 +19,8 @@ vi.mock("electron", () => ({
 }));
 
 import * as ElectronProtocol from "./ElectronProtocol.ts";
+
+const electronProtocolLayer = ElectronProtocol.layer.pipe(Layer.provide(NodeServices.layer));
 
 describe("ElectronProtocol", () => {
   beforeEach(() => {
@@ -36,8 +42,10 @@ describe("ElectronProtocol", () => {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
             scheme: "t3code-dev",
-            targetOrigin: new URL("http://127.0.0.1:3773/"),
-            backendOrigin: new URL("http://127.0.0.1:3774/"),
+            renderer: {
+              _tag: "Proxy",
+              targetOrigin: new URL("http://127.0.0.1:3773/"),
+            },
             clerkFrontendApiHostname: "clerk.t3.codes",
           });
           assert.isDefined(handler);
@@ -85,7 +93,7 @@ describe("ElectronProtocol", () => {
       assert.isNull(forwardedHeaders.get("referer"));
       assert.isNull(forwardedHeaders.get("sec-fetch-site"));
       assert.deepEqual(unhandleMock.mock.calls, [["t3code-dev"]]);
-    }).pipe(Effect.provide(ElectronProtocol.layer)),
+    }).pipe(Effect.provide(electronProtocolLayer)),
   );
 
   it.effect("rejects custom protocol requests for another host", () =>
@@ -100,8 +108,10 @@ describe("ElectronProtocol", () => {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
             scheme: "t3code",
-            targetOrigin: new URL("http://127.0.0.1:3773/"),
-            backendOrigin: new URL("http://127.0.0.1:3773/"),
+            renderer: {
+              _tag: "Proxy",
+              targetOrigin: new URL("http://127.0.0.1:3773/"),
+            },
             clerkFrontendApiHostname: undefined,
           });
           return yield* Effect.promise(() => handler!(new Request("t3code://other/")));
@@ -110,7 +120,63 @@ describe("ElectronProtocol", () => {
 
       assert.equal(response.status, 404);
       assert.equal(netFetchMock.mock.calls.length, 0);
-    }).pipe(Effect.provide(ElectronProtocol.layer)),
+    }).pipe(Effect.provide(electronProtocolLayer)),
+  );
+
+  it.effect("serves bundled renderer assets and SPA routes without a backend", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const rootDirectory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-static-" });
+      yield* Effect.all([
+        fileSystem.writeFileString(
+          path.join(rootDirectory, "index.html"),
+          "<html>client only</html>",
+        ),
+        fileSystem.writeFileString(path.join(rootDirectory, "app.js"), "export {};"),
+      ]);
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "t3code",
+            renderer: { _tag: "Static", rootDirectory },
+            clerkFrontendApiHostname: undefined,
+          });
+          assert.isDefined(handler);
+
+          const routeResponse = yield* Effect.promise(() =>
+            handler!(new Request("t3code://app/settings/connections")),
+          );
+          assert.equal(
+            yield* Effect.promise(() => routeResponse.text()),
+            "<html>client only</html>",
+          );
+          assert.equal(routeResponse.headers.get("content-type"), "text/html; charset=utf-8");
+          assert.include(routeResponse.headers.get("content-security-policy") ?? "", "default-src");
+
+          const assetResponse = yield* Effect.promise(() =>
+            handler!(new Request("t3code://app/app.js")),
+          );
+          assert.equal(yield* Effect.promise(() => assetResponse.text()), "export {};");
+          assert.equal(assetResponse.headers.get("content-type"), "text/javascript; charset=utf-8");
+
+          const missingAssetResponse = yield* Effect.promise(() =>
+            handler!(new Request("t3code://app/missing.js")),
+          );
+          assert.equal(missingAssetResponse.status, 404);
+          assert.equal(netFetchMock.mock.calls.length, 0);
+        }),
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(electronProtocolLayer, NodeServices.layer)),
+    ),
   );
 
   it.effect("retries transient renderer target failures", () =>
@@ -128,8 +194,10 @@ describe("ElectronProtocol", () => {
           const protocol = yield* ElectronProtocol.ElectronProtocol;
           yield* protocol.registerDesktopProtocol({
             scheme: "t3code-dev",
-            targetOrigin: new URL("http://127.0.0.1:5733/"),
-            backendOrigin: new URL("http://127.0.0.1:3773/"),
+            renderer: {
+              _tag: "Proxy",
+              targetOrigin: new URL("http://127.0.0.1:5733/"),
+            },
             clerkFrontendApiHostname: undefined,
           });
           return yield* Effect.promise(() => handler!(new Request("t3code-dev://app/")));
@@ -138,7 +206,7 @@ describe("ElectronProtocol", () => {
 
       assert.equal(yield* Effect.promise(() => response.text()), "ready");
       assert.equal(netFetchMock.mock.calls.length, 2);
-    }).pipe(Effect.provide(ElectronProtocol.layer)),
+    }).pipe(Effect.provide(electronProtocolLayer)),
   );
 
   it.effect("preserves protocol registration failures", () =>
@@ -152,8 +220,10 @@ describe("ElectronProtocol", () => {
       const error = yield* Effect.scoped(
         protocol.registerDesktopProtocol({
           scheme: "t3code-dev",
-          targetOrigin: new URL("http://127.0.0.1:3773/"),
-          backendOrigin: new URL("http://127.0.0.1:3774/"),
+          renderer: {
+            _tag: "Proxy",
+            targetOrigin: new URL("http://127.0.0.1:3773/"),
+          },
           clerkFrontendApiHostname: undefined,
         }),
       ).pipe(Effect.flip);
@@ -162,7 +232,7 @@ describe("ElectronProtocol", () => {
       assert.equal(error.scheme, "t3code-dev");
       assert.strictEqual(error.cause, cause);
       assert.equal(error.message, 'Failed to register Electron protocol scheme "t3code-dev".');
-    }).pipe(Effect.provide(ElectronProtocol.layer)),
+    }).pipe(Effect.provide(electronProtocolLayer)),
   );
 
   it.effect("preserves protocol unregistration failures", () =>
@@ -177,8 +247,10 @@ describe("ElectronProtocol", () => {
         Effect.scoped(
           protocol.registerDesktopProtocol({
             scheme: "t3code",
-            targetOrigin: new URL("http://127.0.0.1:3773/"),
-            backendOrigin: new URL("http://127.0.0.1:3773/"),
+            renderer: {
+              _tag: "Proxy",
+              targetOrigin: new URL("http://127.0.0.1:3773/"),
+            },
             clerkFrontendApiHostname: undefined,
           }),
         ),
@@ -192,14 +264,16 @@ describe("ElectronProtocol", () => {
         assert.strictEqual(error.cause, cause);
         assert.equal(error.message, 'Failed to unregister Electron protocol scheme "t3code".');
       }
-    }).pipe(Effect.provide(ElectronProtocol.layer)),
+    }).pipe(Effect.provide(electronProtocolLayer)),
   );
 
   it("keeps executable sources host-restricted while allowing runtime network resources", () => {
     const policy = ElectronProtocol.makeDesktopContentSecurityPolicy({
       scheme: "t3code",
-      targetOrigin: new URL("http://127.0.0.1:3773/"),
-      backendOrigin: new URL("http://127.0.0.1:3773/"),
+      renderer: {
+        _tag: "Proxy",
+        targetOrigin: new URL("http://127.0.0.1:3773/"),
+      },
       clerkFrontendApiHostname: "clerk.t3.codes",
     });
     const directives = Object.fromEntries(

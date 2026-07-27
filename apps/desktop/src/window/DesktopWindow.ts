@@ -73,6 +73,9 @@ export class DesktopWindow extends Context.Service<
     // no longer used to point the window at the backend — it is kept only for the
     // readiness log and to preserve the callback contract the backend pool drives.
     readonly handleBackendReady: (httpBaseUrl: URL) => Effect.Effect<void, DesktopWindowError>;
+    // Client-only mode has no backend readiness event. Once its static renderer
+    // protocol is installed, this opens the real window through the same latch.
+    readonly handleClientReady: Effect.Effect<void, DesktopWindowError>;
     // Called when the backend transitions back to "not ready" (clean stop,
     // restart, crash). Clears the latch that lets `activate` auto-create a
     // window so a "macOS dock click" while the backend is down doesn't
@@ -759,6 +762,11 @@ export const make = Effect.gen(function* () {
       yield* logWindowInfo("backend ready", { source: "http", url: httpBaseUrl.href });
       yield* createMainIfBackendReady;
     }),
+    handleClientReady: Effect.gen(function* () {
+      yield* Ref.set(backendReadyRef, true);
+      yield* logWindowInfo("client-only renderer ready", { source: "static" });
+      yield* createMainIfBackendReady;
+    }).pipe(Effect.withSpan("desktop.window.handleClientReady")),
     handleBackendNotReady: Ref.set(backendReadyRef, false).pipe(
       Effect.withSpan("desktop.window.handleBackendNotReady"),
     ),

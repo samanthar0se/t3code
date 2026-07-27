@@ -11,6 +11,7 @@ import {
 describe("hostedPairing", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("reads hosted pairing host and query token parameters", () => {
@@ -90,5 +91,16 @@ describe("hostedPairing", () => {
 
     vi.stubEnv("VITE_HTTP_URL", "https://backend.example.com");
     expect(isHostedStaticApp(new URL("https://nightly.app.t3.codes/"))).toBe(false);
+  });
+
+  it("treats desktop client-only mode as a static client regardless of origin", () => {
+    vi.stubGlobal("window", {
+      desktopBridge: {
+        getRuntimeMode: () => "client-only",
+      },
+    });
+    vi.stubEnv("VITE_HTTP_URL", "https://configured-backend.example.com");
+
+    expect(isHostedStaticApp(new URL("t3code://app/"))).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import {
   ContextMenuItemSchema,
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
+  DesktopRuntimeModeSchema,
   DesktopThemeSchema,
   PickFolderOptionsSchema,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
@@ -14,6 +15,7 @@ import * as Schema from "effect/Schema";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "../../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
+import * as DesktopLifecycle from "../../app/DesktopLifecycle.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslBackend from "../../wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
@@ -52,6 +54,31 @@ export const getAppBranding = DesktopIpc.makeSyncIpcMethod({
   handler: Effect.fn("desktop.ipc.window.getAppBranding")(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     return environment.branding;
+  }),
+});
+
+export const getRuntimeMode = DesktopIpc.makeSyncIpcMethod({
+  channel: IpcChannels.GET_RUNTIME_MODE_CHANNEL,
+  result: DesktopRuntimeModeSchema,
+  handler: Effect.fn("desktop.ipc.window.getRuntimeMode")(function* () {
+    const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
+    const settings = yield* appSettings.get;
+    return settings.runtimeMode;
+  }),
+});
+
+export const setRuntimeMode = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SET_RUNTIME_MODE_CHANNEL,
+  payload: DesktopRuntimeModeSchema,
+  result: DesktopRuntimeModeSchema,
+  handler: Effect.fn("desktop.ipc.window.setRuntimeMode")(function* (mode) {
+    const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
+    const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+    const change = yield* appSettings.setRuntimeMode(mode);
+    if (change.changed) {
+      yield* lifecycle.relaunch(`runtimeMode=${mode}`);
+    }
+    return change.settings.runtimeMode;
   }),
 });
 

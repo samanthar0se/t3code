@@ -137,15 +137,40 @@ const fatalStartupCause = <E>(stage: string, cause: Cause.Cause<E>) =>
   handleFatalStartupError(stage, Cause.pretty(cause)).pipe(Effect.andThen(Effect.failCause(cause)));
 
 const bootstrap = Effect.gen(function* () {
-  const pool = yield* DesktopBackendPool.DesktopBackendPool;
-  const primaryBackend = yield* pool.primary;
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
+  yield* logBootstrapInfo("bootstrap start");
+
+  const settings = yield* desktopSettings.get;
+  if (settings.runtimeMode === "client-only") {
+    yield* electronProtocol.registerDesktopProtocol({
+      scheme: ElectronProtocol.getDesktopScheme(environment.isDevelopment),
+      renderer: environment.isDevelopment
+        ? {
+            _tag: "Proxy",
+            targetOrigin: Option.getOrThrow(environment.devServerUrl),
+          }
+        : {
+            _tag: "Static",
+            rootDirectory: environment.path.join(environment.appRoot, "apps/server/dist/client"),
+          },
+      clerkFrontendApiHostname: DesktopClerk.desktopClerkFrontendApiHostname,
+    });
+    yield* installDesktopIpcHandlers();
+    yield* logBootstrapInfo("client-only runtime initialized");
+    if (!(yield* Ref.get(state.quitting))) {
+      yield* desktopWindow.handleClientReady;
+    }
+    return;
+  }
+
+  const pool = yield* DesktopBackendPool.DesktopBackendPool;
+  const primaryBackend = yield* pool.primary;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
   const wslBackend = yield* DesktopWslBackend.DesktopWslBackend;
-  const desktopWindow = yield* DesktopWindow.DesktopWindow;
-  yield* logBootstrapInfo("bootstrap start");
 
   if (environment.isDevelopment && Option.isNone(environment.configuredBackendPort)) {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
@@ -163,7 +188,6 @@ const bootstrap = Effect.gen(function* () {
     },
   );
 
-  const settings = yield* desktopSettings.get;
   if (settings.serverExposureMode !== environment.defaultDesktopSettings.serverExposureMode) {
     yield* logBootstrapInfo("bootstrap restoring persisted server exposure mode", {
       mode: settings.serverExposureMode,
@@ -171,14 +195,15 @@ const bootstrap = Effect.gen(function* () {
   }
   const serverExposureState = yield* serverExposure.configureFromSettings({ port: backendPort });
   const backendConfig = yield* serverExposure.backendConfig;
-  const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
   const rendererTarget = environment.isDevelopment
     ? Option.getOrThrow(environment.devServerUrl)
     : backendConfig.httpBaseUrl;
   yield* electronProtocol.registerDesktopProtocol({
     scheme: ElectronProtocol.getDesktopScheme(environment.isDevelopment),
-    targetOrigin: rendererTarget,
-    backendOrigin: backendConfig.httpBaseUrl,
+    renderer: {
+      _tag: "Proxy",
+      targetOrigin: rendererTarget,
+    },
     clerkFrontendApiHostname: DesktopClerk.desktopClerkFrontendApiHostname,
   });
   yield* logBootstrapInfo("bootstrap resolved backend endpoint", {

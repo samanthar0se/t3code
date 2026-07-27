@@ -1,7 +1,10 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as NodeTimersPromises from "node:timers/promises";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -50,8 +53,15 @@ export class ElectronProtocolUnregistrationError extends Schema.TaggedErrorClass
 
 export interface DesktopProtocolRegistrationInput {
   readonly scheme: string;
-  readonly targetOrigin: URL;
-  readonly backendOrigin: URL;
+  readonly renderer:
+    | {
+        readonly _tag: "Proxy";
+        readonly targetOrigin: URL;
+      }
+    | {
+        readonly _tag: "Static";
+        readonly rootDirectory: string;
+      };
   readonly clerkFrontendApiHostname: string | undefined;
 }
 
@@ -149,6 +159,109 @@ async function proxyRequest(
   return withContentSecurityPolicy(response, contentSecurityPolicy);
 }
 
+const CONTENT_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
+  ".css": "text/css; charset=utf-8",
+  ".gif": "image/gif",
+  ".html": "text/html; charset=utf-8",
+  ".ico": "image/x-icon",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".ttf": "font/ttf",
+  ".txt": "text/plain; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+const existingStaticFile = Effect.fn("desktop.electron.protocol.existingStaticFile")(function* (
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  candidate: string,
+) {
+  const info = yield* fileSystem.stat(candidate).pipe(Effect.option);
+  if (Option.isNone(info)) return null;
+  if (info.value.type === "File") return candidate;
+  if (info.value.type !== "Directory") return null;
+  const indexPath = path.join(candidate, "index.html");
+  const indexInfo = yield* fileSystem.stat(indexPath).pipe(Effect.option);
+  return Option.isSome(indexInfo) && indexInfo.value.type === "File" ? indexPath : null;
+});
+
+function decodeStaticPathname(pathname: string): string | null {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+}
+
+const staticRequest = Effect.fn("desktop.electron.protocol.staticRequest")(function* (
+  request: Request,
+  rootDirectory: string,
+  contentSecurityPolicy: string,
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+) {
+  const requestUrl = new URL(request.url);
+  if (requestUrl.host !== DESKTOP_HOST) {
+    return new Response(null, { status: 404 });
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+
+  const decodedPath = decodeStaticPathname(requestUrl.pathname);
+  if (decodedPath === null) {
+    return new Response("Invalid static file path", { status: 400 });
+  }
+
+  const rawRelativePath = decodedPath.replaceAll("\\", "/").replace(/^\/+/u, "");
+  const normalizedRelativePath = path.normalize(rawRelativePath || "index.html");
+  if (
+    normalizedRelativePath === ".." ||
+    normalizedRelativePath.startsWith(`..${path.sep}`) ||
+    normalizedRelativePath.includes("\0")
+  ) {
+    return new Response("Invalid static file path", { status: 400 });
+  }
+
+  const staticRoot = path.resolve(rootDirectory);
+  const candidate = path.resolve(staticRoot, normalizedRelativePath);
+  const insideRoot =
+    candidate === staticRoot ||
+    candidate.startsWith(staticRoot.endsWith(path.sep) ? staticRoot : `${staticRoot}${path.sep}`);
+  if (!insideRoot) {
+    return new Response("Invalid static file path", { status: 400 });
+  }
+
+  let filePath = yield* existingStaticFile(fileSystem, path, candidate);
+  if (filePath === null && path.extname(normalizedRelativePath) === "") {
+    filePath = yield* existingStaticFile(fileSystem, path, path.join(staticRoot, "index.html"));
+  }
+  if (filePath === null) {
+    return new Response(null, { status: 404 });
+  }
+
+  const headers = new Headers({
+    "Content-Security-Policy": contentSecurityPolicy,
+    "Content-Type":
+      CONTENT_TYPE_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? "application/octet-stream",
+  });
+  if (request.method === "HEAD") {
+    return new Response(null, { status: 200, headers });
+  }
+  const content = yield* fileSystem.readFile(filePath);
+  const body = new Uint8Array(content.byteLength);
+  body.set(content);
+  return new Response(body.buffer, { status: 200, headers });
+});
+
 const TRANSIENT_FETCH_RETRY_DELAYS_MS = [0, 50, 150] as const;
 
 async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<Response> {
@@ -170,6 +283,10 @@ async function fetchWithTransientRetry(url: string, init: RequestInit): Promise<
 }
 
 export const make = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const context = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+  const runPromise = Effect.runPromiseWith(context);
   const registered = yield* Ref.make(false);
 
   const registerDesktopProtocol = Effect.fn("desktop.electron.protocol.registerDesktopProtocol")(
@@ -177,13 +294,35 @@ export const make = Effect.gen(function* () {
       if (yield* Ref.get(registered)) return;
 
       const contentSecurityPolicy = makeDesktopContentSecurityPolicy(input);
+      const renderer = input.renderer;
+      if (renderer._tag === "Static") {
+        const rootDirectory = renderer.rootDirectory;
+        yield* fileSystem
+          .access(path.join(rootDirectory, "index.html"))
+          .pipe(
+            Effect.mapError(
+              (cause) => new ElectronProtocolRegistrationError({ scheme: input.scheme, cause }),
+            ),
+          );
+      }
 
       yield* Effect.acquireRelease(
         Effect.try({
           try: () => {
-            Electron.protocol.handle(input.scheme, (request) =>
-              proxyRequest(request, input.targetOrigin, contentSecurityPolicy),
-            );
+            Electron.protocol.handle(input.scheme, (request) => {
+              if (renderer._tag === "Static") {
+                return runPromise(
+                  staticRequest(
+                    request,
+                    renderer.rootDirectory,
+                    contentSecurityPolicy,
+                    fileSystem,
+                    path,
+                  ),
+                );
+              }
+              return proxyRequest(request, renderer.targetOrigin, contentSecurityPolicy);
+            });
           },
           catch: (cause) => new ElectronProtocolRegistrationError({ scheme: input.scheme, cause }),
         }).pipe(Effect.andThen(Ref.set(registered, true))),

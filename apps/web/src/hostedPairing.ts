@@ -32,6 +32,10 @@ function originFromUrl(value: string): string | null {
 }
 
 export function isHostedStaticApp(url: URL = new URL(window.location.href)): boolean {
+  if (typeof window !== "undefined" && window.desktopBridge?.getRuntimeMode?.() === "client-only") {
+    return true;
+  }
+
   if (configuredBackendUrl()) {
     return false;
   }

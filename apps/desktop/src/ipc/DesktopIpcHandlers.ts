@@ -33,12 +33,14 @@ import {
 import {
   confirm,
   getAppBranding,
+  getRuntimeMode,
   getLocalEnvironmentBootstraps,
   getLocalEnvironmentBearerToken,
   getWindowFullscreenState,
   openExternal,
   pickFolder,
   setTheme,
+  setRuntimeMode,
   showContextMenu,
 } from "./methods/window.ts";
 import * as PreviewIpc from "./methods/preview.ts";
@@ -49,9 +51,11 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* PreviewIpc.installPreviewEventForwarding();
 
   yield* ipc.handleSync(getAppBranding);
+  yield* ipc.handleSync(getRuntimeMode);
   yield* ipc.handleSync(getWindowFullscreenState);
   yield* ipc.handleSync(getLocalEnvironmentBootstraps);
   yield* ipc.handle(getLocalEnvironmentBearerToken);
+  yield* ipc.handle(setRuntimeMode);
 
   yield* ipc.handle(getClientSettings);
   yield* ipc.handle(setClientSettings);

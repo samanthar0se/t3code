@@ -1,6 +1,8 @@
 import {
   DesktopServerExposureModeSchema,
+  DesktopRuntimeModeSchema,
   DesktopUpdateChannelSchema,
+  type DesktopRuntimeMode,
   type DesktopServerExposureMode,
   type DesktopUpdateChannel,
 } from "@t3tools/contracts";
@@ -20,6 +22,7 @@ import { resolveDefaultDesktopUpdateChannel } from "../updates/updateChannels.ts
 import { isValidDistroName } from "../wsl/wslPathParsing.ts";
 
 export interface DesktopSettings {
+  readonly runtimeMode: DesktopRuntimeMode;
   readonly mainWindowBounds: DesktopWindowBounds | null;
   readonly mainWindowMaximized: boolean;
   readonly serverExposureMode: DesktopServerExposureMode;
@@ -67,6 +70,7 @@ export const DEFAULT_MAIN_WINDOW_SIZE = {
 } as const;
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
+  runtimeMode: "host-and-client",
   mainWindowBounds: null,
   mainWindowMaximized: false,
   serverExposureMode: "local-only",
@@ -87,6 +91,7 @@ const DesktopWindowBoundsDocument = Schema.Struct({
 });
 
 const DesktopSettingsDocument = Schema.Struct({
+  runtimeMode: Schema.optionalKey(DesktopRuntimeModeSchema),
   mainWindowBounds: Schema.optionalKey(Schema.NullOr(DesktopWindowBoundsDocument)),
   mainWindowMaximized: Schema.optionalKey(Schema.Boolean),
   serverExposureMode: Schema.optionalKey(DesktopServerExposureModeSchema),
@@ -147,6 +152,9 @@ export class DesktopAppSettings extends Context.Service<
     readonly setMainWindowBounds: (
       bounds: DesktopWindowBounds,
       isMaximized: boolean,
+    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+    readonly setRuntimeMode: (
+      mode: DesktopRuntimeMode,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setServerExposureMode: (
       mode: DesktopServerExposureMode,
@@ -216,6 +224,7 @@ function normalizeDesktopSettingsDocument(
     (parsed.wslBackendEnabled === undefined && parsed.wslMode === "wsl");
 
   return {
+    runtimeMode: parsed.runtimeMode === "client-only" ? "client-only" : "host-and-client",
     mainWindowBounds,
     mainWindowMaximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,
     serverExposureMode:
@@ -237,6 +246,10 @@ function toDesktopSettingsDocument(
   defaults: DesktopSettings,
 ): DesktopSettingsDocument {
   const document: Mutable<DesktopSettingsDocument> = {};
+
+  if (settings.runtimeMode !== defaults.runtimeMode) {
+    document.runtimeMode = settings.runtimeMode;
+  }
 
   if (settings.mainWindowBounds !== null) {
     document.mainWindowBounds = settings.mainWindowBounds;
@@ -281,6 +294,18 @@ function setServerExposureMode(
     : {
         ...settings,
         serverExposureMode: requestedMode,
+      };
+}
+
+function setRuntimeMode(
+  settings: DesktopSettings,
+  requestedMode: DesktopRuntimeMode,
+): DesktopSettings {
+  return settings.runtimeMode === requestedMode
+    ? settings
+    : {
+        ...settings,
+        runtimeMode: requestedMode,
       };
 }
 
@@ -506,6 +531,10 @@ export const make = Effect.gen(function* () {
           },
         }),
       ),
+    setRuntimeMode: (mode) =>
+      persist((settings) => setRuntimeMode(settings, mode)).pipe(
+        Effect.withSpan("desktop.settings.setRuntimeMode", { attributes: { mode } }),
+      ),
     setServerExposureMode: (mode) =>
       persist((settings) => setServerExposureMode(settings, mode)).pipe(
         Effect.withSpan("desktop.settings.setServerExposureMode", { attributes: { mode } }),
@@ -565,6 +594,7 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
         load: SynchronizedRef.get(settingsRef),
         setMainWindowBounds: (bounds, isMaximized) =>
           update((settings) => setMainWindowBounds(settings, bounds, isMaximized)),
+        setRuntimeMode: (mode) => update((settings) => setRuntimeMode(settings, mode)),
         setServerExposureMode: (mode) =>
           update((settings) => setServerExposureMode(settings, mode)),
         setTailscaleServe: (input) => update((settings) => setTailscaleServe(settings, input)),

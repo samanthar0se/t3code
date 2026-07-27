@@ -83,6 +83,21 @@ From there, connect from another device in either of these ways:
 
 Use `t3 serve --help` for the full flag reference. It supports the same general startup options as the normal server command, including an optional `cwd` argument.
 
+### Desktop Client-Only Mode
+
+Use this when the desktop app should connect to saved remote environments without running a T3
+server on the client machine:
+
+1. Pair or add the remote environment from **Settings** → **Connections**.
+2. Under **Desktop runtime**, enable **Client only**.
+3. Confirm the restart.
+
+In client-only mode, Electron serves the bundled interface directly. It does not allocate a local
+backend port, start the local or WSL backends, expose a server over the network, or start Tailscale
+Serve. Projects, files, terminals, git state, and provider sessions come only from saved remote
+environments. If no remote environment is saved, use **Add environment** after the restart. Turn
+**Client only** off to restart with the local backend again.
+
 For hosted web pairing over Tailscale HTTPS, opt in to Tailscale Serve:
 
 ```bash
@@ -96,10 +111,9 @@ By default this configures Tailscale Serve on HTTPS port 443 and advertises
 npx t3 serve --tailscale-serve --tailscale-serve-port 8443
 ```
 
-> Note
-> The GUIs do not currently support adding projects on remote environments.
-> For now, use `t3 project ...` on the server machine instead.
-> Full GUI support for remote project management is coming soon.
+When more than one environment is connected, the project picker asks which environment owns the
+project. Choose the remote environment to browse or clone on the remote host; choosing **This
+device** uses the desktop app's local backend when it is enabled.
 
 ### Option 3: Desktop-Managed SSH Launch
 

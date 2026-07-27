@@ -75,6 +75,7 @@ function makePoolLayer(
           createMainIfBackendReady: Effect.die("unexpected window create"),
           showConnectingSplash: Effect.void,
           handleBackendReady: () => Effect.void,
+          handleClientReady: Effect.void,
           handleBackendNotReady: Effect.void,
           flushMainWindowBounds: Effect.void,
           dispatchMenuAction: () => Effect.die("unexpected menu action"),

@@ -11,6 +11,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopAppSettings from "./DesktopAppSettings.ts";
 
 const DesktopSettingsPatch = Schema.Struct({
+  runtimeMode: Schema.optionalKey(Schema.Literals(["host-and-client", "client-only"])),
   mainWindowBounds: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -102,6 +103,7 @@ describe("DesktopSettings", () => {
     assert.deepEqual(
       DesktopAppSettings.resolveDefaultDesktopSettings("0.0.17-nightly.20260415.1"),
       {
+        runtimeMode: "host-and-client",
         mainWindowBounds: null,
         mainWindowMaximized: false,
         serverExposureMode: "local-only",
@@ -121,6 +123,7 @@ describe("DesktopSettings", () => {
       Effect.gen(function* () {
         const settings = yield* DesktopAppSettings.DesktopAppSettings;
         yield* writeSettingsPatch({
+          runtimeMode: "client-only",
           serverExposureMode: "network-accessible",
           tailscaleServeEnabled: true,
           tailscaleServePort: 8443,
@@ -129,6 +132,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          runtimeMode: "client-only",
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "network-accessible",
@@ -140,6 +144,10 @@ describe("DesktopSettings", () => {
           wslOnly: false,
           wslDistro: null,
         } satisfies DesktopAppSettings.DesktopSettings);
+
+        const runtimeMode = yield* settings.setRuntimeMode("host-and-client");
+        assert.isTrue(runtimeMode.changed);
+        assert.equal(runtimeMode.settings.runtimeMode, "host-and-client");
 
         const exposure = yield* settings.setServerExposureMode("local-only");
         assert.isTrue(exposure.changed);
@@ -235,6 +243,7 @@ describe("DesktopSettings", () => {
         );
 
         assert.deepEqual(yield* settings.load, {
+          runtimeMode: "host-and-client",
           mainWindowBounds: { x: 120, y: 80, width: 1280, height: 900 },
           mainWindowMaximized: false,
           serverExposureMode: "network-accessible",
@@ -300,6 +309,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          runtimeMode: "host-and-client",
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
@@ -327,6 +337,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          runtimeMode: "host-and-client",
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
@@ -353,6 +364,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          runtimeMode: "host-and-client",
           mainWindowBounds: null,
           mainWindowMaximized: false,
           serverExposureMode: "local-only",
