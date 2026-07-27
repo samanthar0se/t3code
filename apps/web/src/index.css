@@ -121,7 +121,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      compositor updates discrete frames instead of every vsync. */
   --animate-status-pulse: status-pulse 2s infinite;
   --animate-status-ping: status-ping 2s infinite;
-  --animate-sidebar-working-text: sidebar-working-text 3.4s infinite;
+  --animate-shimmer-text: shimmer-text 3.4s infinite;
   --animate-sidebar-input-text: sidebar-input-text 2.6s infinite;
   --font-sans:
     "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -203,23 +203,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       scale: 2;
     }
   }
-  @keyframes sidebar-working-text {
-    0%,
-    36% {
-      opacity: 1;
-      animation-timing-function: steps(10);
+  /* Highlight band sweeping across the glyphs, then resting off-screen for the
+     back half of the cycle. Percentages are inverted relative to the travel
+     direction: with a 200%-wide image, position p places the highlight at
+     -p + 100% of the box, so 180% -> -80% reads left-to-right. */
+  @keyframes shimmer-text {
+    0% {
+      background-position: 180% 0;
+      animation-timing-function: linear;
     }
-    50%,
-    86% {
-      opacity: 0.75;
-      animation-timing-function: steps(10);
-    }
+    55%,
     100% {
-      opacity: 1;
+      background-position: -80% 0;
     }
   }
-  /* Blocked-on-you blink. Unlike the working shimmer (long even fade, reads
-     as "in motion"), this holds full opacity for most of the cycle and drops
+  /* Blocked-on-you blink. Unlike the working shimmer (a band travelling along
+     the text, reads as "in motion"), this holds full opacity and drops
      briefly — a short deviation is what the eye catches in peripheral vision,
      so it stays findable in a long list without shimmering constantly. */
   @keyframes sidebar-input-text {
@@ -818,6 +817,36 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   background-image: var(--surface-grain);
   background-repeat: repeat;
   background-size: 256px 256px;
+}
+
+/* Text shimmer for in-flight rows (sidebar "Working"). A band sweeps across the
+   glyphs instead of fading the whole label: motion along the text reads as
+   "progressing", where an opacity pulse reads as a heartbeat. `color` is left
+   alone — only the fill is transparent — so currentColor drives the gradient
+   and the label keeps its semantic hue for selection and forced-colors. */
+@utility shimmer-text {
+  background-image: linear-gradient(
+    100deg,
+    currentColor 35%,
+    color-mix(in oklab, currentColor 25%, var(--background)) 50%,
+    currentColor 65%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: var(--animate-shimmer-text);
+}
+
+/* Reduced motion can't just stop the animation: the fill is transparent, so a
+   frozen shimmer is an invisible label. Drop back to flat colored text. */
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+  }
 }
 
 /* Suppress all transitions during theme changes */
