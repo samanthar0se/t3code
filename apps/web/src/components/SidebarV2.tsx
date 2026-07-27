@@ -1478,7 +1478,7 @@ export default function SidebarV2() {
     () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
     [],
   );
-  const [settledShelfExpanded, setSettledShelfExpanded] = useState(true);
+  const [settledShelfExpanded, setSettledShelfExpanded] = useState(false);
   const toggleSettledShelf = useCallback(() => setSettledShelfExpanded((value) => !value), []);
   const renderedSettledThreads = useMemo(() => {
     if (settledShelfExpanded) return visibleSettledThreads;
