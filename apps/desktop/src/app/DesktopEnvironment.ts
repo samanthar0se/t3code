@@ -99,9 +99,9 @@ function resolveDesktopAppBranding(input: {
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    // Fork-only: the stable channel ships unsuffixed. `stageLabel` still
-    // carries "Alpha" so it keeps satisfying DesktopAppStageLabelSchema.
-    displayName: stageLabel === "Alpha" ? APP_BASE_NAME : `${APP_BASE_NAME} (${stageLabel})`,
+    // Fork-only: every published channel ships as the unsuffixed product.
+    // `stageLabel` remains available for update-channel behavior.
+    displayName: APP_BASE_NAME,
   };
 }
 

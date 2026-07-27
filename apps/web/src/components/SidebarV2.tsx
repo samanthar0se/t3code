@@ -451,8 +451,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
       ? {
           label: "Working",
           icon: "working" as const,
-          className:
-            "animate-sidebar-working-text text-sky-600 motion-reduce:animate-none dark:text-sky-400",
+          className: "shimmer-text text-sky-600 dark:text-sky-400",
         }
       : status === "approval"
         ? {

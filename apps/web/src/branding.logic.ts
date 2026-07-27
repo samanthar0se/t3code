@@ -4,7 +4,10 @@ export function formatAppDisplayName(input: {
   readonly baseName: string;
   readonly stageLabel: string;
 }): string {
-  if (input.stageLabel.trim().toLowerCase() === "latest") {
+  const normalizedStageLabel = input.stageLabel.trim().toLowerCase();
+  // Fork-only: nightly is the sole published channel, so it is presented as
+  // the normal product rather than a separately branded preview.
+  if (normalizedStageLabel === "latest" || normalizedStageLabel === "nightly") {
     return input.baseName;
   }
 
