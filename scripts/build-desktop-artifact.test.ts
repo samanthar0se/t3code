@@ -28,6 +28,7 @@ import {
   resolveFffNativeDependencies,
   resolveBuildOptions,
   resolveDesktopBuildIconAssets,
+  resolveDesktopArtifactName,
   resolveDesktopProductName,
   resolveDesktopUpdateChannel,
   resolveDesktopWebAssetBrand,
@@ -84,10 +85,19 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
   });
 
-  it("switches desktop packaging product names to nightly for nightly builds", () => {
-    // Fork-only: apps/desktop/package.json ships the "Code" product name.
+  it("uses the fork product name on both release channels", () => {
+    // Fork-only: apps/desktop/package.json ships the "Code" product name, and
+    // this fork publishes nightlies exclusively, so nightly keeps it unsuffixed
+    // rather than taking upstream's "T3 Code (Nightly)".
     assert.equal(resolveDesktopProductName("0.0.17"), "Code");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Code");
+  });
+
+  it("derives the installer filename from the fork product name", () => {
+    assert.equal(
+      resolveDesktopArtifactName("0.0.17-nightly.20260413.42"),
+      "Code-${version}-${arch}.${ext}",
+    );
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {

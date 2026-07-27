@@ -11,10 +11,13 @@
  * env vars, protocol schemes, and repo paths (`t3code`, `T3CODE_*`) are left
  * untouched.
  */
-// The stable channel ships unsuffixed, so the baked-in "(Alpha)" goes too.
-// Ordered: the suffixed form has to match before the bare one.
+// This fork ships unsuffixed on every channel, so the baked-in "(Alpha)" and
+// "(Nightly)" go too — nightly is the only channel published here, which makes
+// the suffix noise rather than a distinction.
+// Ordered: the suffixed forms have to match before the bare one.
 const REWRITES = [
   [/T3 Code \(Alpha\)/g, "Code"],
+  [/T3 Code \(Nightly\)/g, "Code"],
   [/T3 Code/g, "Code"],
 ] as const;
 

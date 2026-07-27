@@ -1366,10 +1366,19 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
   return `${trimmed.slice(0, versionSeparator)}/${trimmed.slice(versionSeparator + 1)}`;
 }
 
+// Fork-only: this fork publishes nightlies exclusively, so the nightly build is
+// the product rather than a side channel. Both channels therefore take the
+// package.json product name; upstream's "T3 Code (Nightly)" suffix would mean
+// no shipped client ever showed the fork's name.
 export function resolveDesktopProductName(version: string): string {
-  return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+  return desktopPackageJson.productName ?? "T3 Code";
+}
+
+// electron-builder macros can't reach productName, so build the template here.
+// Spaces would survive into the filename, so collapse them.
+export function resolveDesktopArtifactName(version: string): string {
+  const slug = resolveDesktopProductName(version).trim().replaceAll(/\s+/g, "-");
+  return `${slug}-\${version}-\${arch}.\${ext}`;
 }
 
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -1389,7 +1398,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: resolveDesktopArtifactName(version),
     directories: {
       buildResources: "apps/desktop/resources",
     },
