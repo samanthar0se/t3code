@@ -2192,6 +2192,129 @@ describe("ProviderRuntimeIngestion", () => {
     expect(assistantEvents[3]?.payload.text).toBe("");
   });
 
+  it("starts a new buffered assistant segment after a mid-turn assistant completion for Pi-style segment ids", async () => {
+    const harness = await createHarness();
+    const startedAt = "2026-03-28T08:00:00.000Z";
+    const toolStartedAt = "2026-03-28T08:00:01.000Z";
+    const resumedAt = "2026-03-28T08:00:02.000Z";
+    const completedAt = "2026-03-28T08:00:03.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-pi-segment-boundary"),
+      provider: ProviderDriverKind.make("pi"),
+      createdAt: startedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-pi-segment-boundary"),
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-pi-segment-boundary",
+    );
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-pi-segment-boundary-initial"),
+      provider: ProviderDriverKind.make("pi"),
+      createdAt: startedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-pi-segment-boundary"),
+      itemId: asItemId("pi-assistant:turn-pi-segment-boundary:segment:0"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "before tool",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-message-completed-pi-segment-boundary-initial"),
+      provider: ProviderDriverKind.make("pi"),
+      createdAt: toolStartedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-pi-segment-boundary"),
+      itemId: asItemId("pi-assistant:turn-pi-segment-boundary:segment:0"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+      },
+    });
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-tool-started-pi-segment-boundary"),
+      provider: ProviderDriverKind.make("pi"),
+      createdAt: toolStartedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-pi-segment-boundary"),
+      itemId: asItemId("tool-pi-segment-boundary"),
+      payload: {
+        itemType: "command_execution",
+        title: "bash",
+        detail: "pwd",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-tool-completed-pi-segment-boundary"),
+      provider: ProviderDriverKind.make("pi"),
+      createdAt: resumedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-pi-segment-boundary"),
+      itemId: asItemId("tool-pi-segment-boundary"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "bash",
+      },
+    });
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-message-delta-pi-segment-boundary-followup"),
+      provider: ProviderDriverKind.make("pi"),
+      createdAt: resumedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-pi-segment-boundary"),
+      itemId: asItemId("pi-assistant:turn-pi-segment-boundary:segment:1"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: " after tool",
+      },
+    });
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-pi-segment-boundary"),
+      provider: ProviderDriverKind.make("pi"),
+      createdAt: completedAt,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-pi-segment-boundary"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:pi-assistant:turn-pi-segment-boundary:segment:1" &&
+          !message.streaming &&
+          message.text === " after tool",
+      ),
+    );
+    expect(
+      thread.messages.find(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:pi-assistant:turn-pi-segment-boundary:segment:0",
+      )?.text,
+    ).toBe("before tool");
+    expect(
+      thread.messages.find(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:pi-assistant:turn-pi-segment-boundary:segment:1",
+      )?.text,
+    ).toBe(" after tool");
+  });
+
   it("starts a new streaming assistant message segment after approval", async () => {
     const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
     const startedAt = "2026-03-28T07:00:00.000Z";
