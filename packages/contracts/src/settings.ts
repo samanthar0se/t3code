@@ -58,8 +58,13 @@ export const GlassOpacity = Schema.Int.check(
 );
 export type GlassOpacity = typeof GlassOpacity.Type;
 export const DEFAULT_GLASS_OPACITY: GlassOpacity = 80;
+export const APP_ZOOM_OPTIONS = [75, 80, 90, 100, 110, 125, 150] as const;
+export const AppZoom = Schema.Literals(APP_ZOOM_OPTIONS);
+export type AppZoom = typeof AppZoom.Type;
+export const DEFAULT_APP_ZOOM: AppZoom = 100;
 
 export const ClientSettingsSchema = Schema.Struct({
+  appZoom: AppZoom.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_APP_ZOOM))),
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -604,6 +609,7 @@ export const ServerSettingsPatch = Schema.Struct({
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
+  appZoom: Schema.optionalKey(AppZoom),
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
