@@ -2,6 +2,44 @@
 
 This document covers the unified release workflow for stable and nightly desktop releases.
 
+## Personal fork nightly (samanthar0se/t3code)
+
+For this fork, use **Desktop Nightly** (`.github/workflows/desktop-nightly.yml`), not the
+upstream-oriented **Release** workflow (`.github/workflows/release.yml`):
+
+```sh
+# Push committed changes to main, then start a build immediately.
+git push origin HEAD:main
+~/.local/bin/github-app gh . -- workflow run desktop-nightly.yml --ref main
+
+# Find and watch the run started for that commit.
+~/.local/bin/github-app gh . -- run list --workflow desktop-nightly.yml --limit 5
+~/.local/bin/github-app gh . -- run watch <run-id> --exit-status
+```
+
+The workflow also runs daily at 07:00 UTC and skips a scheduled build when `main` still points to
+the commit carrying the newest `v*-nightly.*` tag. A manual dispatch always builds.
+
+This is a deliberately small, unsigned desktop distribution pipeline:
+
+- builds Windows x64 (NSIS) and macOS arm64 (DMG/ZIP);
+- publishes a GitHub prerelease in `samanthar0se/t3code` named
+  `Code Nightly <version> (<sha>)`;
+- uses `vX.Y.Z-nightly.YYYYMMDD.<run_number>` tags and the Electron `nightly` update channel;
+- publishes the updater manifests and blockmaps alongside the installers, so installed fork builds
+  receive later fork nightlies from this repository;
+- embeds the server in the desktop app and does **not** publish `t3` to npm;
+- does not deploy the hosted web app or T3 Connect relay and requires no release secrets.
+
+The fork's live Actions and Releases pages are the source of truth:
+
+- <https://github.com/samanthar0se/t3code/actions/workflows/desktop-nightly.yml>
+- <https://github.com/samanthar0se/t3code/releases>
+
+The scheduled **Release** runs visible in this fork are inherited from upstream. Do not dispatch
+that workflow for a personal desktop build: it expects the upstream npm, Vercel, Clerk, relay, and
+signing setup described below.
+
 ## What the workflow does
 
 - Workflow: `.github/workflows/release.yml`

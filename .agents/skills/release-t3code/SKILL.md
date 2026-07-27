@@ -18,6 +18,33 @@ Plan and execute the smallest production release that safely propagates the comm
 - Do not create a stable release unless the user explicitly supplies and confirms its version. Default propagation uses the nightly channel.
 - Before a production push or workflow dispatch, summarize the affected surfaces and proceed only when the current request explicitly authorizes the release. Otherwise ask one focused confirmation question.
 
+## Route this personal fork
+
+After inspecting the GitHub App repository, branch on the repository slug:
+
+- For `samanthar0se/t3code`, the normal release is the personal **Desktop Nightly** workflow,
+  `.github/workflows/desktop-nightly.yml`.
+- Do not dispatch `.github/workflows/release.yml` for a normal personal-fork build. That is the
+  upstream unified product pipeline and expects npm, Vercel, Clerk, relay, and signing setup that
+  this fork deliberately does not use.
+- The personal workflow builds unsigned Windows x64 and macOS arm64 desktop artifacts, publishes
+  them as a GitHub prerelease, and supplies Electron's `nightly` update channel from this fork.
+- It embeds the server in the desktop app; it does not publish the `t3` npm package, deploy hosted
+  web, or deploy the T3 Connect relay.
+- A manual dispatch always builds. The daily 07:00 UTC schedule skips when `main` has not moved
+  since the newest `v*-nightly.*` tag.
+
+After pushing `main`, dispatch and watch:
+
+```bash
+~/.local/bin/github-app gh . -- workflow run desktop-nightly.yml --ref main
+~/.local/bin/github-app gh . -- run list --workflow desktop-nightly.yml --limit 5
+~/.local/bin/github-app gh . -- run watch <run-id> --exit-status
+```
+
+Use the pushed `HEAD` SHA and dispatch time to select the run; do not accidentally watch an older
+scheduled run.
+
 ## Inspect changes
 
 1. Fetch `origin/main` and tags without prompting for credentials. Resolve the App helper to an absolute path and pass it explicitly:
@@ -44,6 +71,10 @@ Plan and execute the smallest production release that safely propagates the comm
 ## Decide whether the server needs a build
 
 The server package is governed by an exact-version invariant:
+
+For `samanthar0se/t3code` personal Desktop Nightly builds, report
+`server: embedded in desktop (no npm publish)`. The exact-version npm invariant below applies to
+the upstream unified release, not this fork's client-only distribution.
 
 - Every released hosted-web or desktop client version must have a matching `t3@<exact-version>` package on npm.
 - Therefore, a unified release always builds and publishes the server package, even when server source is unchanged. This is a version-alignment build, not necessarily a server-code rebuild.
