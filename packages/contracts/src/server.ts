@@ -104,10 +104,25 @@ export const ServerProviderUsageWindow = Schema.Struct({
 });
 export type ServerProviderUsageWindow = typeof ServerProviderUsageWindow.Type;
 
+/**
+ * Prepaid credit balance for usage-based plans. Providers on these plans
+ * report no rate-limit windows, so `balance` is the only usage signal a
+ * surface can show. `unlimited` accounts have nothing meaningful to
+ * display at all.
+ */
+export const ServerProviderUsageCredits = Schema.Struct({
+  balance: Schema.optional(TrimmedNonEmptyString),
+  unlimited: Schema.Boolean,
+});
+export type ServerProviderUsageCredits = typeof ServerProviderUsageCredits.Type;
+
 export const ServerProviderUsageLimits = Schema.Struct({
   source: Schema.Literals(["codexAppServer", "claudePrint"]),
   checkedAt: IsoDateTime,
   windows: Schema.Array(ServerProviderUsageWindow),
+  /** Human-readable plan name ("Pro", "Team"), when the provider reports one. */
+  planLabel: Schema.optional(TrimmedNonEmptyString),
+  credits: Schema.optional(ServerProviderUsageCredits),
 });
 export type ServerProviderUsageLimits = typeof ServerProviderUsageLimits.Type;
 

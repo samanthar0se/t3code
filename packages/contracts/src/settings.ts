@@ -21,6 +21,20 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+/**
+ * How much provider usage the sidebar footer surfaces.
+ *
+ *  - `hidden` — no usage surface at all (the default; existing installs
+ *    do not gain new footer chrome unannounced).
+ *  - `compact` — reserved. Its design is still in progress; consumers
+ *    render it as `hidden` until that lands.
+ *  - `full` — a per-provider block per enabled instance, one row per
+ *    reported rate-limit window.
+ */
+export const SidebarUsageDisplay = Schema.Literals(["hidden", "compact", "full"]);
+export type SidebarUsageDisplay = typeof SidebarUsageDisplay.Type;
+export const DEFAULT_SIDEBAR_USAGE_DISPLAY: SidebarUsageDisplay = "hidden";
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
   "repository_path",
@@ -118,6 +132,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   sidebarThreadPreviewCount: SidebarThreadPreviewCount.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT)),
+  ),
+  sidebarUsageDisplay: SidebarUsageDisplay.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_USAGE_DISPLAY)),
   ),
   sidebarV2Enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   timestampFormat: TimestampFormat.pipe(
@@ -644,6 +661,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
+  sidebarUsageDisplay: Schema.optionalKey(SidebarUsageDisplay),
   sidebarV2Enabled: Schema.optionalKey(Schema.Boolean),
   timestampFormat: Schema.optionalKey(TimestampFormat),
   showProviderUsageInContextPopover: Schema.optionalKey(Schema.Boolean),
