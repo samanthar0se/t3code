@@ -19,6 +19,7 @@ import {
 } from "../ui/sidebar";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
+import { SidebarUsageFull } from "./SidebarUsageFull";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -111,6 +112,10 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter className="p-2">
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
+      {/* Self-gating on `sidebarUsageDisplay`, and collapses to nothing when
+          no provider has reported usage — so it costs no footer height by
+          default and never competes with the pills above. */}
+      <SidebarUsageFull />
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton

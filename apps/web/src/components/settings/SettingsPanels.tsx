@@ -114,6 +114,12 @@ const THEME_OPTIONS = [
   },
 ] as const;
 
+const SIDEBAR_USAGE_DISPLAY_LABELS = {
+  hidden: "Hidden",
+  compact: "Compact",
+  full: "Full",
+} as const;
+
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
   "12-hour": "12-hour",
@@ -411,6 +417,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
         ? ["Project Grouping"]
         : []),
+      ...(settings.sidebarUsageDisplay !== DEFAULT_UNIFIED_SETTINGS.sidebarUsageDisplay
+        ? ["Usage display"]
+        : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...(settings.showProviderUsageInContextPopover !==
       DEFAULT_UNIFIED_SETTINGS.showProviderUsageInContextPopover
@@ -466,6 +475,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableProviderUpdateChecks,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
+      settings.sidebarUsageDisplay,
       settings.timestampFormat,
       settings.showProviderUsageInContextPopover,
       settings.wordWrap,
@@ -492,6 +502,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
+      sidebarUsageDisplay: DEFAULT_UNIFIED_SETTINGS.sidebarUsageDisplay,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
@@ -673,6 +684,53 @@ export function GeneralSettingsPanel() {
               }}
               aria-label="Project Grouping"
             />
+          }
+        />
+
+        <SettingsRow
+          title="Usage display"
+          description="Show provider rate-limit usage above the sidebar Settings button."
+          resetAction={
+            settings.sidebarUsageDisplay !== DEFAULT_UNIFIED_SETTINGS.sidebarUsageDisplay ? (
+              <SettingResetButton
+                label="usage display"
+                onClick={() =>
+                  updateSettings({
+                    sidebarUsageDisplay: DEFAULT_UNIFIED_SETTINGS.sidebarUsageDisplay,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarUsageDisplay}
+              onValueChange={(value) => {
+                // "compact" is intentionally unreachable from this control
+                // until its design lands; the enum value already round-trips.
+                if (value === "hidden" || value === "full") {
+                  updateSettings({ sidebarUsageDisplay: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Usage display">
+                <SelectValue>
+                  {SIDEBAR_USAGE_DISPLAY_LABELS[settings.sidebarUsageDisplay]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="hidden">
+                  {SIDEBAR_USAGE_DISPLAY_LABELS.hidden}
+                </SelectItem>
+                <SelectItem disabled hideIndicator value="compact">
+                  {SIDEBAR_USAGE_DISPLAY_LABELS.compact}
+                  <span className="ml-2 text-xs text-muted-foreground">Coming soon</span>
+                </SelectItem>
+                <SelectItem hideIndicator value="full">
+                  {SIDEBAR_USAGE_DISPLAY_LABELS.full}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
 

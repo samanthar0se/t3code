@@ -1,4 +1,8 @@
-import type { ServerProviderUsageLimits, ServerProviderUsageWindow } from "@t3tools/contracts";
+import type {
+  ServerProviderUsageCredits,
+  ServerProviderUsageLimits,
+  ServerProviderUsageWindow,
+} from "@t3tools/contracts";
 import type * as CodexSchema from "effect-codex-app-server/schema";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
@@ -46,6 +50,48 @@ function mapCodexWindow(
   };
 }
 
+/**
+ * Codex reports plans as machine slugs. `unknown` carries no information a
+ * user could act on, so it is dropped rather than surfaced as a label.
+ */
+const CODEX_PLAN_LABELS: Partial<
+  Record<CodexSchema.V2GetAccountRateLimitsResponse__PlanType, string>
+> = {
+  free: "Free",
+  go: "Go",
+  plus: "Plus",
+  pro: "Pro",
+  prolite: "Pro Lite",
+  team: "Team",
+  self_serve_business_usage_based: "Business",
+  business: "Business",
+  enterprise_cbp_usage_based: "Enterprise",
+  enterprise: "Enterprise",
+  edu: "Edu",
+};
+
+function codexPlanLabel(
+  planType: CodexSchema.V2GetAccountRateLimitsResponse__PlanType | null | undefined,
+): string | undefined {
+  if (planType === undefined || planType === null) return undefined;
+  return CODEX_PLAN_LABELS[planType];
+}
+
+/**
+ * `hasCredits: false` on a metered account means the balance is exhausted,
+ * which is still worth showing; only a wholly absent snapshot is dropped.
+ */
+function mapCodexCredits(
+  credits: CodexSchema.V2GetAccountRateLimitsResponse__CreditsSnapshot | null | undefined,
+): ServerProviderUsageCredits | undefined {
+  if (!credits) return undefined;
+  const balance = credits.balance?.trim();
+  return {
+    unlimited: credits.unlimited,
+    ...(balance ? { balance } : {}),
+  };
+}
+
 export function usageLimitsFromCodexRateLimits(
   response: CodexSchema.V2GetAccountRateLimitsResponse,
   checkedAt: string,
@@ -54,7 +100,18 @@ export function usageLimitsFromCodexRateLimits(
     mapCodexWindow(response.rateLimits.primary),
     mapCodexWindow(response.rateLimits.secondary),
   ].filter((window): window is ServerProviderUsageWindow => window !== undefined);
-  return windows.length > 0 ? { source: "codexAppServer", checkedAt, windows } : undefined;
+  const planLabel = codexPlanLabel(response.rateLimits.planType);
+  const credits = mapCodexCredits(response.rateLimits.credits);
+  // Usage-based plans report no windows at all; their credit balance is the
+  // only usage signal, so an empty window list is not an empty snapshot.
+  if (windows.length === 0 && credits === undefined) return undefined;
+  return {
+    source: "codexAppServer",
+    checkedAt,
+    windows,
+    ...(planLabel ? { planLabel } : {}),
+    ...(credits ? { credits } : {}),
+  };
 }
 
 function parseClaudeReset(input: {
