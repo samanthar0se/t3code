@@ -15,7 +15,8 @@ export function resolveSidebarStageBackdropVariant(
   stageLabel: string,
 ): SidebarStageBackdropVariant | null {
   const normalized = stageLabel.trim().toLowerCase();
-  if (normalized === "nightly") return "nightly";
+  // Fork-only: nightly is the normal release channel and should not receive
+  // upstream's preview-channel chrome.
   if (normalized === "dev") return "dev";
   return null;
 }

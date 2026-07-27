@@ -98,6 +98,19 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
+  it.effect("presents nightly builds as the unsuffixed fork product", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        appVersion: "0.0.23-nightly.20260727.1",
+      });
+
+      assert.equal(environment.branding.baseName, "Code");
+      assert.equal(environment.branding.stageLabel, "Nightly");
+      assert.equal(environment.branding.displayName, "Code");
+      assert.equal(environment.displayName, "Code");
+    }),
+  );
+
   it.effect("keeps implicit development state separate from production state", () =>
     Effect.gen(function* () {
       const development = yield* makeEnvironment(

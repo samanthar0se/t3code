@@ -56,4 +56,5 @@ Because Icon Composer is macOS-only, the tracked `dev/` rasters (plus the `apps/
 copies and `apps/desktop/resources/icon.{png,ico}`) were regenerated with
 `node scripts/fork-render-brand-icons.mjs`, which renders the same layer stack in headless
 Chrome. It is a stand-in, not a replacement: prefer `vp run icons:export` when a Mac is
-available. The `nightly/` and `prod/` projects are untouched upstream artwork.
+available. Packaged releases use this `dev/` family on every updater channel; the
+`nightly/` and `prod/` projects remain untouched upstream artwork.
