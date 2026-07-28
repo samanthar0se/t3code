@@ -6,10 +6,11 @@ import {
 } from "./hostedBrowserWebviewStyle";
 
 describe("resolveHostedBrowserWebviewWrapperStyle", () => {
-  it("places an active webview on its presented surface", () => {
+  it("cancels app zoom when placing a webview in visual viewport pixels", () => {
     expect(
       resolveHostedBrowserWebviewWrapperStyle({
         active: true,
+        appZoom: 125,
         rect: { x: 12, y: 34, width: 800, height: 600 },
         hiddenSize: { width: 1280, height: 800 },
       }),
@@ -18,6 +19,7 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
       top: 34,
       width: 800,
       height: 600,
+      zoom: 0.8,
       zIndex: 30,
       pointerEvents: "auto",
     });
@@ -27,6 +29,7 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
     expect(
       resolveHostedBrowserWebviewWrapperStyle({
         active: true,
+        appZoom: 100,
         cornerRadius: 12,
         rect: { x: 12, y: 34, width: 360, height: 203 },
         hiddenSize: { width: 1280, height: 800 },
@@ -43,6 +46,7 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
   it("keeps an inactive webview paintable while moving it offscreen", () => {
     const style = resolveHostedBrowserWebviewWrapperStyle({
       active: false,
+      appZoom: 80,
       rect: { x: 12, y: 34, width: 800, height: 600 },
       hiddenSize: { width: 393, height: 852 },
     });
@@ -52,6 +56,7 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
       top: HIDDEN_BROWSER_WEBVIEW_OFFSET,
       width: 393,
       height: 852,
+      zoom: 1.25,
       zIndex: -1,
       pointerEvents: "none",
       visibility: "visible",

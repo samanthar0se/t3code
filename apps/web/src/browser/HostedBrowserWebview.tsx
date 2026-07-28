@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
+import { useClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
@@ -50,6 +51,7 @@ export function HostedBrowserWebview(props: {
   readonly zoomFactor: number;
 }) {
   const { threadRef, tabId, runtimeTabId, initialUrl, viewport, zoomFactor } = props;
+  const appZoom = useClientSettings((settings) => settings.appZoom);
   const config = usePreviewWebviewConfig(threadRef.environmentId);
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
@@ -233,6 +235,7 @@ export function HostedBrowserWebview(props: {
 
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({
     active,
+    appZoom,
     cornerRadius: presentation.cornerRadius,
     rect: lastRect,
     hiddenSize,
