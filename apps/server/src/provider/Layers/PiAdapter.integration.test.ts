@@ -570,8 +570,7 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
       );
       const assistantCompletionIndex = events.findIndex(
         (event) =>
-          event.type === "item.completed" &&
-          event.payload.itemType === "assistant_message",
+          event.type === "item.completed" && event.payload.itemType === "assistant_message",
       );
       const toolStartIndex = events.findIndex(
         (event) =>
@@ -583,7 +582,8 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
         (event): event is Extract<ProviderRuntimeEvent, { type: "content.delta" }> =>
           event.type === "content.delta" && event.payload.streamKind === "assistant_text",
       );
-      const assistantCompletion = assistantCompletionIndex >= 0 ? events[assistantCompletionIndex] : undefined;
+      const assistantCompletion =
+        assistantCompletionIndex >= 0 ? events[assistantCompletionIndex] : undefined;
 
       expect(assistantCompletionIndex).toBeGreaterThanOrEqual(0);
       expect(toolStartIndex).toBeGreaterThan(assistantCompletionIndex);
@@ -594,6 +594,7 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
       expect(assistantDeltas[1]?.itemId).toMatch(/^pi-assistant:.*:segment:1$/);
       expect(assistantDeltas[0]?.itemId).not.toBe(assistantDeltas[1]?.itemId);
       expect(assistantCompletion?.itemId).toBe(assistantDeltas[0]?.itemId);
+      expect(new Set(events.map((event) => event.eventId)).size).toBe(events.length);
     }),
   );
 

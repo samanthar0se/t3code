@@ -307,7 +307,11 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       readonly provider: ProviderDriverKind;
       readonly providerInstanceId: ProviderInstanceId;
       readonly threadId: ThreadId;
-      readonly raw?: { readonly source: "pi.rpc.event" | "pi.rpc.extension-ui"; readonly method: string; readonly payload: unknown };
+      readonly raw?: {
+        readonly source: "pi.rpc.event" | "pi.rpc.extension-ui";
+        readonly method: string;
+        readonly payload: unknown;
+      };
     },
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -417,6 +421,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         case "tool_execution_start": {
           if (!context.turnState) return;
           yield* closeActiveAssistantSegment(context, base);
+          const toolStamp = yield* makeEventStamp();
           const itemId = RuntimeItemId.make(event.toolCallId);
           const itemType = classifyPiToolItemType(event.toolName);
           const detail = summarizePiToolArgs(event.args);
@@ -432,6 +437,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
           });
           yield* offerRuntimeEvent({
             ...base,
+            ...toolStamp,
             turnId: context.turnState.turnId,
             itemId,
             type: "item.started",
