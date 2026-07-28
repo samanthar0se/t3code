@@ -587,6 +587,151 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         ]);
       });
 
+      it("preserves the last usage snapshot when an authenticated refresh omits usage", () => {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          driver: ProviderDriverKind.make("claudeAgent"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated", email: "claude@example.com" },
+          checkedAt: "2026-07-28T12:00:00.000Z",
+          version: "2.1.218",
+          models: [],
+          slashCommands: [],
+          skills: [],
+          usageLimits: {
+            source: "claudePrint",
+            checkedAt: "2026-07-28T12:00:00.000Z",
+            windows: [{ label: "Session", usedPercent: 30 }],
+          },
+        } as const satisfies ServerProvider;
+        const refreshedProvider = {
+          ...previousProvider,
+          checkedAt: "2026-07-28T12:01:00.000Z",
+          usageLimits: undefined,
+        } satisfies ServerProvider;
+
+        assert.deepStrictEqual(
+          mergeProviderSnapshot(previousProvider, refreshedProvider).usageLimits,
+          previousProvider.usageLimits,
+        );
+      });
+
+      it("preserves the last usage snapshot while the provider auth probe is unavailable", () => {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          driver: ProviderDriverKind.make("claudeAgent"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: {
+            status: "authenticated",
+            type: "maxplan",
+            email: "claude@example.com",
+          },
+          checkedAt: "2026-07-28T12:00:00.000Z",
+          version: "2.1.218",
+          models: [],
+          slashCommands: [],
+          skills: [],
+          usageLimits: {
+            source: "claudePrint",
+            checkedAt: "2026-07-28T12:00:00.000Z",
+            windows: [{ label: "Session", usedPercent: 30 }],
+          },
+        } as const satisfies ServerProvider;
+        const refreshedProvider = {
+          ...previousProvider,
+          status: "warning",
+          auth: { status: "unknown" },
+          checkedAt: "2026-07-28T12:01:00.000Z",
+          usageLimits: undefined,
+        } satisfies ServerProvider;
+
+        assert.deepStrictEqual(
+          mergeProviderSnapshot(previousProvider, refreshedProvider).usageLimits,
+          previousProvider.usageLimits,
+        );
+      });
+
+      it("clears old usage when the provider identity or availability changes", () => {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          driver: ProviderDriverKind.make("claudeAgent"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: {
+            status: "authenticated",
+            type: "maxplan",
+            email: "first@example.com",
+          },
+          checkedAt: "2026-07-28T12:00:00.000Z",
+          version: "2.1.218",
+          models: [],
+          slashCommands: [],
+          skills: [],
+          usageLimits: {
+            source: "claudePrint",
+            checkedAt: "2026-07-28T12:00:00.000Z",
+            windows: [{ label: "Session", usedPercent: 30 }],
+          },
+        } as const satisfies ServerProvider;
+
+        const changedAccount = {
+          ...previousProvider,
+          auth: {
+            status: "authenticated",
+            type: "maxplan",
+            email: "second@example.com",
+          },
+          checkedAt: "2026-07-28T12:01:00.000Z",
+          usageLimits: undefined,
+        } satisfies ServerProvider;
+        const changedAuthMethod = {
+          ...previousProvider,
+          auth: {
+            status: "authenticated",
+            type: "apiKey",
+            email: "first@example.com",
+          },
+          checkedAt: "2026-07-28T12:01:00.000Z",
+          usageLimits: undefined,
+        } satisfies ServerProvider;
+        const signedOut = {
+          ...previousProvider,
+          auth: { status: "unauthenticated" },
+          checkedAt: "2026-07-28T12:01:00.000Z",
+          usageLimits: undefined,
+        } satisfies ServerProvider;
+        const uninstalled = {
+          ...previousProvider,
+          installed: false,
+          status: "error",
+          auth: { status: "unknown" },
+          checkedAt: "2026-07-28T12:01:00.000Z",
+          usageLimits: undefined,
+        } satisfies ServerProvider;
+
+        assert.strictEqual(
+          mergeProviderSnapshot(previousProvider, changedAccount).usageLimits,
+          undefined,
+        );
+        assert.strictEqual(
+          mergeProviderSnapshot(previousProvider, changedAuthMethod).usageLimits,
+          undefined,
+        );
+        assert.strictEqual(
+          mergeProviderSnapshot(previousProvider, signedOut).usageLimits,
+          undefined,
+        );
+        assert.strictEqual(
+          mergeProviderSnapshot(previousProvider, uninstalled).usageLimits,
+          undefined,
+        );
+      });
+
       it("drops stale OpenCode models missing from a successful refresh", () => {
         const previousProvider = {
           instanceId: ProviderInstanceId.make("opencode"),

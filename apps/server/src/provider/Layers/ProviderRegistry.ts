@@ -123,6 +123,43 @@ const mergeProviderModels = (
     : mergedModels;
 };
 
+const normalizedProviderAccountEmail = (provider: ServerProvider): string | undefined =>
+  provider.auth.email?.trim().toLowerCase();
+
+const shouldRetainMissingProviderUsage = (
+  previousProvider: ServerProvider,
+  nextProvider: ServerProvider,
+): boolean => {
+  if (previousProvider.usageLimits === undefined || nextProvider.usageLimits !== undefined) {
+    return false;
+  }
+
+  if (!nextProvider.enabled || !nextProvider.installed || nextProvider.status === "disabled") {
+    return false;
+  }
+
+  // A failed provider/auth probe is not evidence that the last successful
+  // usage snapshot was invalid. Keep it so consumers can present it as stale.
+  if (nextProvider.auth.status === "unknown") {
+    return nextProvider.status === "warning" || nextProvider.status === "error";
+  }
+
+  if (nextProvider.auth.status !== "authenticated") {
+    return false;
+  }
+
+  // An authenticated refresh with the same account may still lose an
+  // independent usage probe. Missing identity metadata, changed accounts, and
+  // changed auth methods are intentional boundaries that clear old usage.
+  const previousEmail = normalizedProviderAccountEmail(previousProvider);
+  const nextEmail = normalizedProviderAccountEmail(nextProvider);
+  return (
+    (previousEmail !== undefined || previousProvider.auth.type !== undefined) &&
+    previousEmail === nextEmail &&
+    previousProvider.auth.type === nextProvider.auth.type
+  );
+};
+
 export const mergeProviderSnapshot = (
   previousProvider: ServerProvider | undefined,
   nextProvider: ServerProvider,
@@ -132,6 +169,9 @@ export const mergeProviderSnapshot = (
     : {
         ...nextProvider,
         models: mergeProviderModels(nextProvider, previousProvider.models, nextProvider.models),
+        ...(shouldRetainMissingProviderUsage(previousProvider, nextProvider)
+          ? { usageLimits: previousProvider.usageLimits }
+          : {}),
       };
 
 export const mergeProviderSnapshots = (
