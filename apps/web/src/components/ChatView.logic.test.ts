@@ -15,6 +15,7 @@ import {
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
   buildThreadTurnInterruptInput,
+  createActiveThreadVisitTracker,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   dismissBranchMismatchForSession,
@@ -29,6 +30,32 @@ import {
   shouldShowBranchMismatchBanner,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
+
+describe("createActiveThreadVisitTracker", () => {
+  it("does not mark background updates to the open thread as newly visited", () => {
+    const tracker = createActiveThreadVisitTracker();
+    const threadKey = "environment-local:thread-1";
+
+    expect(tracker.sync({ threadKey, updatedAt: "2026-03-29T00:00:00.000Z" })).toEqual({
+      threadKey,
+      updatedAt: "2026-03-29T00:00:00.000Z",
+    });
+    expect(tracker.sync({ threadKey, updatedAt: "2026-03-29T00:01:00.000Z" })).toBeNull();
+  });
+
+  it("marks a thread again after navigating away and back", () => {
+    const tracker = createActiveThreadVisitTracker();
+    const threadKey = "environment-local:thread-1";
+
+    tracker.sync({ threadKey, updatedAt: "2026-03-29T00:00:00.000Z" });
+    tracker.sync(null);
+
+    expect(tracker.sync({ threadKey, updatedAt: "2026-03-29T00:01:00.000Z" })).toEqual({
+      threadKey,
+      updatedAt: "2026-03-29T00:01:00.000Z",
+    });
+  });
+});
 
 const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");

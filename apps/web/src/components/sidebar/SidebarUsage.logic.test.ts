@@ -6,6 +6,7 @@ import {
   hasRenderableUsage,
   isUsageStale,
   usageCreditsLabel,
+  usageRowResetLabel,
   usageRowValueLabel,
   usageSeverity,
   usageWindowLabel,
@@ -111,6 +112,27 @@ describe("usageRowValueLabel", () => {
         NOW,
       ),
     ).toEqual({ kind: "percent", text: "100%" });
+  });
+});
+
+describe("usageRowResetLabel", () => {
+  it("returns the countdown whenever a future reset is known", () => {
+    expect(
+      usageRowResetLabel(
+        { label: "Session", usedPercent: 82, resetsAt: "2026-07-27T14:08:00.000Z" },
+        NOW,
+      ),
+    ).toBe("2h 08m");
+  });
+
+  it("returns null when the reset is missing or past", () => {
+    expect(usageRowResetLabel({ label: "Session", usedPercent: 82 }, NOW)).toBeNull();
+    expect(
+      usageRowResetLabel(
+        { label: "Session", usedPercent: 82, resetsAt: "2026-07-27T11:00:00.000Z" },
+        NOW,
+      ),
+    ).toBeNull();
   });
 });
 

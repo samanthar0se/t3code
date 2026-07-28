@@ -553,3 +553,29 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );
 }
+
+export interface ActiveThreadVisit {
+  readonly threadKey: string;
+  readonly updatedAt: string;
+}
+
+export interface ActiveThreadVisitTracker {
+  readonly sync: (activeThread: ActiveThreadVisit | null) => ActiveThreadVisit | null;
+}
+
+export function createActiveThreadVisitTracker(): ActiveThreadVisitTracker {
+  let activeThreadKey: string | null = null;
+  return {
+    sync: (activeThread) => {
+      if (activeThread === null) {
+        activeThreadKey = null;
+        return null;
+      }
+      if (activeThread.threadKey === activeThreadKey) {
+        return null;
+      }
+      activeThreadKey = activeThread.threadKey;
+      return activeThread;
+    },
+  };
+}

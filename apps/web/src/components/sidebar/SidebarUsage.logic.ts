@@ -82,11 +82,18 @@ export function usageRowValueLabel(
   nowMs: number,
 ): { readonly kind: "percent" | "reset"; readonly text: string } {
   const percent = Math.round(clampPercent(window.usedPercent));
-  if (percent >= 100 && window.resetsAt !== undefined) {
-    const countdown = formatTimeToReset(window.resetsAt, nowMs);
+  if (percent >= 100) {
+    const countdown = usageRowResetLabel(window, nowMs);
     if (countdown !== null) return { kind: "reset", text: countdown };
   }
   return { kind: "percent", text: `${percent}%` };
+}
+
+export function usageRowResetLabel(
+  window: ServerProviderUsageWindow,
+  nowMs: number,
+): string | null {
+  return window.resetsAt === undefined ? null : formatTimeToReset(window.resetsAt, nowMs);
 }
 
 export function clampPercent(usedPercent: number): number {

@@ -42,12 +42,14 @@ const providerSettings = (providerInstances: Record<string, { readonly enabled?:
 function render(
   providers: ReadonlyArray<ServerProvider>,
   providerInstances: Record<string, { readonly enabled?: boolean }> = {},
+  showResetTimes = false,
 ): string {
   return renderToStaticMarkup(
     <SidebarUsageBlocksForTest
       nowMs={NOW}
       providers={providers}
       settings={providerSettings(providerInstances)}
+      showResetTimes={showResetTimes}
     />,
   );
 }
@@ -135,6 +137,33 @@ describe("SidebarUsageFull blocks", () => {
 
     expect(markup).toContain("2h 08m");
     expect(markup).not.toContain(">100%<");
+  });
+
+  it("reveals reset countdowns on usage-section hover", () => {
+    const markup = render(
+      [
+        provider({
+          instanceId: "codex",
+          usageLimits: {
+            source: "codexAppServer",
+            checkedAt: "2026-07-27T12:00:00.000Z",
+            windows: [
+              {
+                label: "Session",
+                usedPercent: 42,
+                windowDurationMins: 300,
+                resetsAt: "2026-07-27T14:08:00.000Z",
+              },
+            ],
+          },
+        }),
+      ],
+      {},
+      true,
+    );
+
+    expect(markup).toContain("2h 08m");
+    expect(markup).not.toContain(">42%<");
   });
 
   it("shows a credit balance in place of window rows", () => {

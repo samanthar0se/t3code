@@ -253,6 +253,7 @@ import {
   buildLocalDraftThread,
   buildThreadTurnInterruptInput,
   collectUserMessageBlobPreviewUrls,
+  createActiveThreadVisitTracker,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   dismissBranchMismatchForSession,
@@ -1807,17 +1808,24 @@ function ChatViewContent(props: ChatViewProps) {
     [openOrReuseProjectDraftThread],
   );
 
+  const activeThreadVisitTrackerRef = useRef(createActiveThreadVisitTracker());
+
   useEffect(() => {
-    if (!serverThread?.id) return;
-    const threadUpdatedAt = Date.parse(serverThread.updatedAt);
+    const activeVisit = activeThreadVisitTrackerRef.current.sync(
+      serverThread?.id
+        ? {
+            threadKey: scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
+            updatedAt: serverThread.updatedAt,
+          }
+        : null,
+    );
+    if (activeVisit === null) return;
+    const threadUpdatedAt = Date.parse(activeVisit.updatedAt);
     if (Number.isNaN(threadUpdatedAt)) return;
     const lastVisitedAt = activeThreadLastVisitedAt ? Date.parse(activeThreadLastVisitedAt) : NaN;
     if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= threadUpdatedAt) return;
 
-    markThreadVisited(
-      scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
-      serverThread.updatedAt,
-    );
+    markThreadVisited(activeVisit.threadKey, activeVisit.updatedAt);
   }, [
     activeThreadLastVisitedAt,
     markThreadVisited,

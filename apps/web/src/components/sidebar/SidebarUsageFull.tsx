@@ -24,6 +24,7 @@ import {
   hasRenderableUsage,
   isUsageStale,
   usageCreditsLabel,
+  usageRowResetLabel,
   usageRowValueLabel,
   usageSeverity,
   usageWindowLabel,
@@ -164,18 +165,31 @@ function SidebarUsageEnvironmentBlocks(props: {
   readonly environments: ReadonlyArray<UsageEnvironment>;
   readonly nowMs: number;
   readonly primaryEnvironmentId: EnvironmentId | null;
+  readonly showResetTimes?: boolean;
 }) {
+  const [hovered, setHovered] = useState(false);
   const blocks = useMemo(
     () => collectUsageBlocks(props.environments, props.primaryEnvironmentId),
     [props.environments, props.primaryEnvironmentId],
   );
 
   if (blocks.length === 0) return null;
+  const showResetTimes = props.showResetTimes ?? hovered;
 
   return (
-    <div className="flex flex-col border-b border-sidebar-border/60" aria-label="Provider usage">
+    <div
+      className="flex flex-col border-b border-sidebar-border/60"
+      aria-label="Provider usage"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {blocks.map((block) => (
-        <SidebarUsageProviderBlock block={block} key={block.key} nowMs={props.nowMs} />
+        <SidebarUsageProviderBlock
+          block={block}
+          key={block.key}
+          nowMs={props.nowMs}
+          showResetTimes={showResetTimes}
+        />
       ))}
     </div>
   );
@@ -185,6 +199,7 @@ function SidebarUsageBlocksForTest(props: {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly settings: UsageEnvironment["settings"];
   readonly nowMs: number;
+  readonly showResetTimes?: boolean;
 }) {
   const environmentId = "test-environment" as EnvironmentId;
   return (
@@ -192,6 +207,7 @@ function SidebarUsageBlocksForTest(props: {
       environments={[{ environmentId, providers: props.providers, settings: props.settings }]}
       nowMs={props.nowMs}
       primaryEnvironmentId={environmentId}
+      {...(props.showResetTimes === undefined ? {} : { showResetTimes: props.showResetTimes })}
     />
   );
 }
@@ -201,7 +217,11 @@ export {
   SidebarUsageEnvironmentBlocks as SidebarUsageEnvironmentsForTest,
 };
 
-function SidebarUsageProviderBlock(props: { readonly block: UsageBlock; readonly nowMs: number }) {
+function SidebarUsageProviderBlock(props: {
+  readonly block: UsageBlock;
+  readonly nowMs: number;
+  readonly showResetTimes: boolean;
+}) {
   const { entry, usageLimits } = props.block;
   const creditsLabel = usageCreditsLabel(usageLimits);
   const stale = isUsageStale(usageLimits, props.nowMs);
@@ -242,6 +262,7 @@ function SidebarUsageProviderBlock(props: { readonly block: UsageBlock; readonly
           <SidebarUsageWindowRow
             key={`${window.label}:${window.windowDurationMins ?? index}`}
             nowMs={props.nowMs}
+            showResetTimes={props.showResetTimes}
             window={window}
           />
         ))
@@ -253,10 +274,13 @@ function SidebarUsageProviderBlock(props: { readonly block: UsageBlock; readonly
 function SidebarUsageWindowRow(props: {
   readonly window: ServerProviderUsageLimits["windows"][number];
   readonly nowMs: number;
+  readonly showResetTimes: boolean;
 }) {
   const usedPercent = clampPercent(props.window.usedPercent);
   const label = usageWindowLabel(props.window);
   const value = usageRowValueLabel(props.window, props.nowMs);
+  const resetLabel = usageRowResetLabel(props.window, props.nowMs);
+  const displayValue = props.showResetTimes && resetLabel !== null ? resetLabel : value.text;
   const severity = usageSeverity(usedPercent);
 
   return (
@@ -283,11 +307,11 @@ function SidebarUsageWindowRow(props: {
       </span>
       <span
         className={cn(
-          "w-7 shrink-0 text-right text-[9.5px] tabular-nums",
+          "relative w-12 shrink-0 text-right text-[9.5px] tabular-nums",
           value.kind === "reset" ? "text-destructive" : "text-sidebar-muted-foreground",
         )}
       >
-        {value.text}
+        {displayValue}
       </span>
     </div>
   );
