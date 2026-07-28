@@ -1,9 +1,9 @@
 import type { ServerProvider } from "@t3tools/contracts";
-import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { SidebarUsageBlocksForTest } from "./SidebarUsageFull";
+import { SidebarUsageBlocksForTest, SidebarUsageEnvironmentsForTest } from "./SidebarUsageFull";
 
 const NOW = Date.parse("2026-07-27T12:00:00.000Z");
 
@@ -12,6 +12,7 @@ function provider(input: {
   readonly driver?: string;
   readonly displayName?: string;
   readonly enabled?: boolean;
+  readonly email?: string;
   readonly usageLimits?: ServerProvider["usageLimits"];
 }): ServerProvider {
   return {
@@ -22,12 +23,21 @@ function provider(input: {
     enabled: input.enabled ?? true,
     installed: true,
     status: "ready",
+    auth: {
+      status: "authenticated",
+      ...(input.email ? { email: input.email } : {}),
+    },
     checkedAt: "2026-07-27T12:00:00.000Z",
     models: [],
     skills: [],
     ...(input.usageLimits ? { usageLimits: input.usageLimits } : {}),
   } as unknown as ServerProvider;
 }
+
+const providerSettings = (providerInstances: Record<string, { readonly enabled?: boolean }> = {}) =>
+  ({ providerInstances, providers: {} }) as unknown as Parameters<
+    typeof SidebarUsageBlocksForTest
+  >[0]["settings"];
 
 function render(
   providers: ReadonlyArray<ServerProvider>,
@@ -37,10 +47,29 @@ function render(
     <SidebarUsageBlocksForTest
       nowMs={NOW}
       providers={providers}
-      settings={
-        { providerInstances, providers: {} } as unknown as Parameters<
-          typeof SidebarUsageBlocksForTest
-        >[0]["settings"]
+      settings={providerSettings(providerInstances)}
+    />,
+  );
+}
+
+function renderEnvironments(
+  environments: ReadonlyArray<{
+    readonly environmentId: string;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly providerInstances?: Record<string, { readonly enabled?: boolean }>;
+  }>,
+  primaryEnvironmentId = environments[0]?.environmentId ?? null,
+): string {
+  return renderToStaticMarkup(
+    <SidebarUsageEnvironmentsForTest
+      environments={environments.map((environment) => ({
+        environmentId: EnvironmentId.make(environment.environmentId),
+        providers: environment.providers,
+        settings: providerSettings(environment.providerInstances),
+      }))}
+      nowMs={NOW}
+      primaryEnvironmentId={
+        primaryEnvironmentId === null ? null : EnvironmentId.make(primaryEnvironmentId)
       }
     />,
   );
@@ -197,5 +226,101 @@ describe("SidebarUsageFull blocks", () => {
     expect(markup).toContain("Codex Work");
     expect(markup).toContain(">12%<");
     expect(markup).toContain(">64%<");
+  });
+
+  it("includes usage reported only by a secondary environment", () => {
+    const markup = renderEnvironments([
+      { environmentId: "primary", providers: [] },
+      {
+        environmentId: "remote",
+        providers: [
+          provider({
+            instanceId: "codex",
+            email: "remote@example.com",
+            usageLimits: {
+              source: "codexAppServer",
+              checkedAt: "2026-07-27T12:00:00.000Z",
+              windows: [{ label: "Session", usedPercent: 67, windowDurationMins: 300 }],
+            },
+          }),
+        ],
+      },
+    ]);
+
+    expect(markup).toContain(">67%<");
+  });
+
+  it("renders distinct accounts from primary and secondary environments", () => {
+    const markup = renderEnvironments([
+      {
+        environmentId: "primary",
+        providers: [
+          provider({
+            instanceId: "codex",
+            email: "personal@example.com",
+            usageLimits: {
+              source: "codexAppServer",
+              checkedAt: "2026-07-27T12:00:00.000Z",
+              windows: [{ label: "Session", usedPercent: 12, windowDurationMins: 300 }],
+            },
+          }),
+        ],
+      },
+      {
+        environmentId: "remote",
+        providers: [
+          provider({
+            instanceId: "codex",
+            email: "work@example.com",
+            usageLimits: {
+              source: "codexAppServer",
+              checkedAt: "2026-07-27T12:00:00.000Z",
+              windows: [{ label: "Session", usedPercent: 64, windowDurationMins: 300 }],
+            },
+          }),
+        ],
+      },
+    ]);
+
+    expect(markup.match(/role="progressbar"/g)).toHaveLength(2);
+    expect(markup).toContain(">12%<");
+    expect(markup).toContain(">64%<");
+  });
+
+  it("deduplicates the same account across environments and keeps its newest usage", () => {
+    const markup = renderEnvironments([
+      {
+        environmentId: "primary",
+        providers: [
+          provider({
+            instanceId: "codex",
+            email: "Same@Example.com",
+            usageLimits: {
+              source: "codexAppServer",
+              checkedAt: "2026-07-27T11:58:00.000Z",
+              windows: [{ label: "Session", usedPercent: 12, windowDurationMins: 300 }],
+            },
+          }),
+        ],
+      },
+      {
+        environmentId: "remote",
+        providers: [
+          provider({
+            instanceId: "codex",
+            email: " same@example.com ",
+            usageLimits: {
+              source: "codexAppServer",
+              checkedAt: "2026-07-27T12:00:00.000Z",
+              windows: [{ label: "Session", usedPercent: 72, windowDurationMins: 300 }],
+            },
+          }),
+        ],
+      },
+    ]);
+
+    expect(markup.match(/role="progressbar"/g)).toHaveLength(1);
+    expect(markup).toContain(">72%<");
+    expect(markup).not.toContain(">12%<");
   });
 });

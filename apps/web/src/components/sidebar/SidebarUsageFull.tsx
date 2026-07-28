@@ -1,12 +1,13 @@
 import { useAtomValue } from "@effect/atom-react";
 import type {
+  EnvironmentId,
+  ServerConfig,
   ServerProvider,
   ServerProviderUsageLimits,
-  UnifiedSettings,
 } from "@t3tools/contracts";
 import { memo, useEffect, useMemo, useState } from "react";
 
-import { usePrimarySettings, useClientSettings } from "../../hooks/useSettings";
+import { useClientSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import {
   applyProviderInstanceSettings,
@@ -15,7 +16,8 @@ import {
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { primaryServerProvidersAtom } from "../../state/server";
+import { primaryEnvironmentIdAtom } from "../../state/primaryEnvironment";
+import { environmentServerConfigsAtom } from "../../state/server";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import {
   clampPercent,
@@ -42,8 +44,15 @@ const SEVERITY_BAR_CLASS: Record<UsageSeverity, string> = {
 };
 
 interface UsageBlock {
+  readonly key: string;
   readonly entry: ProviderInstanceEntry;
   readonly usageLimits: ServerProviderUsageLimits;
+}
+
+interface UsageEnvironment {
+  readonly environmentId: EnvironmentId;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: Pick<ServerConfig["settings"], "providerInstances" | "providers">;
 }
 
 /**
@@ -66,49 +75,131 @@ export const SidebarUsageFull = memo(function SidebarUsageFull() {
 });
 
 function SidebarUsageFullBlocks() {
-  const providers = useAtomValue(primaryServerProvidersAtom);
-  const settings = usePrimarySettings(selectProviderInstanceSettings);
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
   const nowMs = useCoarseNow();
+  const environments = useMemo(
+    () =>
+      [...serverConfigs.entries()].map(
+        ([environmentId, config]): UsageEnvironment => ({
+          environmentId,
+          providers: config.providers,
+          settings: selectProviderInstanceSettings(config.settings),
+        }),
+      ),
+    [serverConfigs],
+  );
 
-  return <SidebarUsageBlocks nowMs={nowMs} providers={providers} settings={settings} />;
+  return (
+    <SidebarUsageEnvironmentBlocks
+      environments={environments}
+      nowMs={nowMs}
+      primaryEnvironmentId={primaryEnvironmentId}
+    />
+  );
 }
 
 /**
- * The rendering half, taking every input as a prop so the block-selection
- * rules (which instances qualify, what each row reads) are exercisable
- * without a server connection or a wall clock.
+ * Build one usage block per account across every environment. Authenticated
+ * account email is the only cross-environment identity the provider snapshot
+ * exposes, so snapshots without it stay environment-scoped rather than risking
+ * collapsing unrelated accounts.
  */
-function SidebarUsageBlocks(props: {
-  readonly providers: ReadonlyArray<ServerProvider>;
-  readonly settings: Pick<UnifiedSettings, "providerInstances" | "providers">;
-  readonly nowMs: number;
-}) {
-  const blocks = useMemo<ReadonlyArray<UsageBlock>>(() => {
+function collectUsageBlocks(
+  environments: ReadonlyArray<UsageEnvironment>,
+  primaryEnvironmentId: EnvironmentId | null,
+): ReadonlyArray<UsageBlock> {
+  const orderedEnvironments = [...environments].sort((left, right) => {
+    if (left.environmentId === primaryEnvironmentId) return -1;
+    if (right.environmentId === primaryEnvironmentId) return 1;
+    return 0;
+  });
+  const blocks: UsageBlock[] = [];
+  const blockIndexByKey = new Map<string, number>();
+
+  for (const environment of orderedEnvironments) {
     const entries = sortProviderInstanceEntries(
-      applyProviderInstanceSettings(deriveProviderInstanceEntries(props.providers), props.settings),
+      applyProviderInstanceSettings(
+        deriveProviderInstanceEntries(environment.providers),
+        environment.settings,
+      ),
     );
-    return entries.flatMap((entry) => {
+    for (const entry of entries) {
       // A signed-out or disabled instance is omitted entirely rather than
       // shown empty; auth state is surfaced elsewhere in the app.
-      if (!isProviderInstancePickerVisible(entry)) return [];
+      if (!isProviderInstancePickerVisible(entry)) continue;
       const usageLimits = entry.snapshot.usageLimits;
-      if (usageLimits === undefined || !hasRenderableUsage(usageLimits)) return [];
-      return [{ entry, usageLimits }];
-    });
-  }, [props.providers, props.settings]);
+      if (usageLimits === undefined || !hasRenderableUsage(usageLimits)) continue;
+
+      const email = entry.snapshot.auth.email?.trim().toLowerCase();
+      const key = email
+        ? `account:${entry.driverKind}:${email}`
+        : `instance:${environment.environmentId}:${entry.instanceId}`;
+      const existingIndex = blockIndexByKey.get(key);
+      const block = { key, entry, usageLimits } satisfies UsageBlock;
+      if (existingIndex === undefined) {
+        blockIndexByKey.set(key, blocks.length);
+        blocks.push(block);
+        continue;
+      }
+
+      const existing = blocks[existingIndex];
+      if (
+        existing &&
+        Date.parse(usageLimits.checkedAt) > Date.parse(existing.usageLimits.checkedAt)
+      ) {
+        blocks[existingIndex] = block;
+      }
+    }
+  }
+
+  return blocks;
+}
+
+/**
+ * The rendering half, taking every input as a prop so aggregation and
+ * deduplication are exercisable without server connections or a wall clock.
+ */
+function SidebarUsageEnvironmentBlocks(props: {
+  readonly environments: ReadonlyArray<UsageEnvironment>;
+  readonly nowMs: number;
+  readonly primaryEnvironmentId: EnvironmentId | null;
+}) {
+  const blocks = useMemo(
+    () => collectUsageBlocks(props.environments, props.primaryEnvironmentId),
+    [props.environments, props.primaryEnvironmentId],
+  );
 
   if (blocks.length === 0) return null;
 
   return (
     <div className="flex flex-col border-b border-sidebar-border/60" aria-label="Provider usage">
       {blocks.map((block) => (
-        <SidebarUsageProviderBlock block={block} key={block.entry.instanceId} nowMs={props.nowMs} />
+        <SidebarUsageProviderBlock block={block} key={block.key} nowMs={props.nowMs} />
       ))}
     </div>
   );
 }
 
-export { SidebarUsageBlocks as SidebarUsageBlocksForTest };
+function SidebarUsageBlocksForTest(props: {
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UsageEnvironment["settings"];
+  readonly nowMs: number;
+}) {
+  const environmentId = "test-environment" as EnvironmentId;
+  return (
+    <SidebarUsageEnvironmentBlocks
+      environments={[{ environmentId, providers: props.providers, settings: props.settings }]}
+      nowMs={props.nowMs}
+      primaryEnvironmentId={environmentId}
+    />
+  );
+}
+
+export {
+  SidebarUsageBlocksForTest,
+  SidebarUsageEnvironmentBlocks as SidebarUsageEnvironmentsForTest,
+};
 
 function SidebarUsageProviderBlock(props: { readonly block: UsageBlock; readonly nowMs: number }) {
   const { entry, usageLimits } = props.block;
@@ -203,8 +294,8 @@ function SidebarUsageWindowRow(props: {
 }
 
 function selectProviderInstanceSettings(
-  settings: UnifiedSettings,
-): Pick<UnifiedSettings, "providerInstances" | "providers"> {
+  settings: ServerConfig["settings"],
+): UsageEnvironment["settings"] {
   return { providerInstances: settings.providerInstances, providers: settings.providers };
 }
 
