@@ -51,6 +51,10 @@ interface FakePiTransport {
   readonly pushEvent: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly pushExtensionUI: (request: RpcExtensionUIRequest) => Effect.Effect<void>;
   readonly setResponse: (commandType: string, response: RpcResponse) => void;
+  readonly setResponseSequence: (
+    commandType: string,
+    responses: ReadonlyArray<RpcResponse | undefined>,
+  ) => void;
   readonly gateRequests: (
     commandType: string,
     entered: Deferred.Deferred<void>,
@@ -67,6 +71,7 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
   const extensionResponses: Array<RpcExtensionUIResponse> = [];
   const extensionResponseQueue = yield* Queue.unbounded<RpcExtensionUIResponse>();
   const responses = new Map<string, RpcResponse>();
+  const responseSequences = new Map<string, Array<RpcResponse | undefined>>();
   const requestGates = new Map<
     string,
     { readonly entered: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }
@@ -125,6 +130,10 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
           yield* Deferred.succeed(gate.entered, undefined).pipe(Effect.ignore);
           yield* Deferred.await(gate.release);
         }
+        const responseSequence = responseSequences.get(commandType);
+        if (responseSequence !== undefined && responseSequence.length > 0) {
+          return responseSequence.shift();
+        }
         return responses.get(commandType);
       }),
     messages,
@@ -142,6 +151,9 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
       Queue.offer(messages, { _tag: "extension-ui", request }).pipe(Effect.asVoid),
     setResponse: (commandType, response) => {
       responses.set(commandType, response);
+    },
+    setResponseSequence: (commandType, sequence) => {
+      responseSequences.set(commandType, [...sequence]);
     },
     gateRequests: (commandType, entered, release) => {
       requestGates.set(commandType, { entered, release });
@@ -270,6 +282,75 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
           threadId,
         });
         expect(result.failure.message).toMatch(/exited during session startup/i);
+      }
+      expect(yield* adapter.hasSession(threadId)).toBe(false);
+    }),
+  );
+
+  it.effect("retries session cursor discovery after the initial state request times out", () =>
+    Effect.gen(function* () {
+      const { adapter, fake, getLaunchOptions } = yield* makePiAdapterForTest(enabledSettings());
+      const threadId = ThreadId.make("pi-int-state-timeout");
+      fake.setResponseSequence("get_state", [
+        undefined,
+        asResponse({
+          type: "response",
+          id: "x",
+          command: "get_state",
+          success: true,
+          data: { sessionFile: "/tmp/pi-resumable-session.json" },
+        }),
+      ]);
+
+      const session = yield* adapter.startSession({
+        threadId,
+        provider: PI,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      expect(session.resumeCursor).toEqual({
+        sessionFile: "/tmp/pi-resumable-session.json",
+      });
+      expect(fake.commands.filter((command) => command.type === "get_state")).toHaveLength(2);
+
+      yield* adapter.stopSession(threadId);
+
+      const resumed = yield* adapter.startSession({
+        threadId,
+        provider: PI,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        resumeCursor: session.resumeCursor,
+      });
+      expect(getLaunchOptions()?.args).toContain("--session");
+      expect(getLaunchOptions()?.args).toContain("/tmp/pi-resumable-session.json");
+      yield* adapter.stopSession(resumed.threadId);
+    }),
+  );
+
+  it.effect("fails startup instead of creating a Pi session without a durable cursor", () =>
+    Effect.gen(function* () {
+      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
+      const threadId = ThreadId.make("pi-int-state-timeout-twice");
+      fake.setResponseSequence("get_state", [undefined, undefined]);
+
+      const result = yield* adapter
+        .startSession({
+          threadId,
+          provider: PI,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.result);
+
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure).toMatchObject({
+          _tag: "ProviderAdapterProcessError",
+          threadId,
+        });
+        expect(result.failure.message).toMatch(/durable session file/i);
       }
       expect(yield* adapter.hasSession(threadId)).toBe(false);
     }),

@@ -69,6 +69,7 @@ import {
 const PROVIDER = ProviderDriverKind.make("pi");
 
 const PI_STATE_TIMEOUT_MS = 5_000;
+const PI_STATE_RETRY_TIMEOUT_MS = 15_000;
 const PI_MESSAGES_TIMEOUT_MS = 5_000;
 // fork/new_session rebinds to a new session file — give it more headroom
 const PI_FORK_TIMEOUT_MS = 15_000;
@@ -922,7 +923,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
     );
     context.notificationFiber = notificationFiber;
 
-    const stateResponse = yield* transport.request(
+    let stateResponse = yield* transport.request(
       { type: "get_state" },
       `pi-get-state-${yield* nextUuid}`,
       PI_STATE_TIMEOUT_MS,
@@ -935,11 +936,28 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         detail: "Pi RPC process exited during session startup.",
       });
     }
-    const sessionFile = extractSessionFile(stateResponse);
-    context.autoCompactionEnabled = extractPiAutoCompactionEnabled(stateResponse);
-    if (sessionFile !== undefined) {
-      context.session = { ...context.session, resumeCursor: { sessionFile } };
+    if (stateResponse === undefined) {
+      yield* Effect.logWarning("pi.session.state-request-retrying", {
+        threadId,
+        timeoutMs: PI_STATE_TIMEOUT_MS,
+      });
+      stateResponse = yield* transport.request(
+        { type: "get_state" },
+        `pi-get-state-retry-${yield* nextUuid}`,
+        PI_STATE_RETRY_TIMEOUT_MS,
+      );
     }
+    const sessionFile = extractSessionFile(stateResponse);
+    if (sessionFile === undefined) {
+      yield* stopSessionInternal(context, { emitExitEvent: false });
+      return yield* new ProviderAdapterProcessError({
+        provider: PROVIDER,
+        threadId,
+        detail: "Pi did not provide a durable session file during startup.",
+      });
+    }
+    context.autoCompactionEnabled = extractPiAutoCompactionEnabled(stateResponse);
+    context.session = { ...context.session, resumeCursor: { sessionFile } };
 
     if (yield* transport.isClosed) {
       yield* stopSessionInternal(context, { emitExitEvent: false });
@@ -961,17 +979,15 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
     });
 
     // session file is the provider-native thread id — publish for provider_thread_id parity
-    if (sessionFile !== undefined) {
-      const threadStartedStamp = yield* makeEventStamp();
-      yield* offerRuntimeEvent({
-        ...threadStartedStamp,
-        type: "thread.started",
-        provider: PROVIDER,
-        providerInstanceId: boundInstanceId,
-        threadId,
-        payload: { providerThreadId: sessionFile },
-      });
-    }
+    const threadStartedStamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      ...threadStartedStamp,
+      type: "thread.started",
+      provider: PROVIDER,
+      providerInstanceId: boundInstanceId,
+      threadId,
+      payload: { providerThreadId: sessionFile },
+    });
 
     const configuredStamp = yield* makeEventStamp();
     yield* offerRuntimeEvent({
